@@ -3,7 +3,7 @@ import { createGame } from "./engine/state.js";
 import { getLegalActions, applyAction } from "./engine/actions.js";
 import { finishGame } from "./engine/scoring.js";
 import { saveGame, loadGame, clearGame } from "./storage.js";
-import { playSfx, startBgm } from "./audio.js";
+import { playSfx, startBgm, stopBgm } from "./audio.js";
 import { HOSPITAL } from "./palettes.js";
 import { ANIMALS } from "./data/animals.js";
 import { getCard } from "./data/cards.js";
@@ -40,6 +40,9 @@ export function startApp() {
   const saved = loadGame();
   if (saved && saved.phase && saved.phase !== "game_over") {
     game = saved;
+    // 새로고침으로 진행 중인 판을 이어할 때도 배경음이 다시 흘러나오게 한다
+    // (원래는 "새 게임 시작" 제출 시에만 틀어서, 새로고침 후엔 무음이었음).
+    startBgm(HOSPITAL, "main");
   }
   render();
 }
@@ -105,6 +108,7 @@ function render() {
     gameArea().innerHTML = variantSelectionHtml(game);
   } else if (game.phase === "game_over") {
     gameArea().innerHTML = gameOverHtml(game, { surrendered });
+    stopBgm();
     clearGame();
   } else {
     gameArea().innerHTML = gameBoardHtml(game, {
@@ -221,6 +225,7 @@ function handleActionClick(btn) {
   if (action === "new-game") {
     clearTimeout(aiTimer);
     clearTimeout(bustTimer);
+    stopBgm();
     game = null;
     pendingBust = null;
     clearGame();
