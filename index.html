@@ -174,9 +174,13 @@
     .mla-toast.mla-show { opacity: 1; top: 22px; }
     .mla-setup-field { margin-bottom: 14px; }
     .mla-setup-field label { display: block; font-size: 13px; color: var(--ink-soft); margin-bottom: 4px; }
-    .mla-setup-field input, .mla-setup-field select {
+    /* type=text/select에만 폭 100%를 준다 — 이 규칙이 checkbox까지 덮어써서 체크박스가
+       가로로 쭉 늘어나며 자기 라벨 글자를 다음 줄로 밀어내던 버그가 있었음(수의사 특기 사용). */
+    .mla-setup-field input[type="text"], .mla-setup-field select {
       width: 100%; padding: 10px; border-radius: 10px; border: 2px solid var(--border); font-size: 15px; background: #fff;
     }
+    .mla-setup-field input[type="checkbox"] { width: auto; height: auto; margin: 0 4px 0 0; vertical-align: middle; }
+    .mla-setup-field label:has(input[type="checkbox"]) { display: flex; align-items: center; font-size: 14px; color: var(--ink); }
     /* flex:1 인 input이 옆의 AI 체크박스 라벨과 한 줄에 있을 때, input의 기본 min-width(auto)가
        내용 기준 최소폭을 강제해 좁은 화면에서 옆으로 넘치던 버그의 핵심 원인 — 반드시 0으로. */
     .mla-setup-field input[type="text"] { min-width: 0; }

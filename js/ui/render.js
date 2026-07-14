@@ -67,7 +67,10 @@ function emptySuitSlotHtml(suit, opts = {}) {
 
 // 지금 대기 중인 결정이 이 플레이어의 입원실 카드를 대상으로 하는지 계산.
 // null이면 이 플레이어와 무관(평소처럼 렌더), Map이면 종류별로 탭 가능한 값이 담긴다.
-function computeSelectableForPlayer(state, player) {
+// aiThinking이면 지금 결정권자가 AI라는 뜻이므로, 사람이 대신 누를 수 있는 것처럼
+// 보이지 않도록 강조를 전부 끈다.
+function computeSelectableForPlayer(state, player, aiThinking) {
+  if (aiThinking) return null;
   const d = state.pendingDecision;
   if (!d) return null;
   if (d.type === "monkey_choose_card" && d.playerId === player.playerId) {
@@ -100,11 +103,11 @@ export function hospitalHtml(player, { showAll = true, selectable = null } = {})
   }).join("");
 }
 
-export function playerPanelHtml(state, player) {
+export function playerPanelHtml(state, player, aiThinking) {
   const isTurn = player.isCurrentPlayer;
   const score = computeScore(state, player);
   const traitName = player.traitId ? TRAITS[player.traitId].name : null;
-  const selectable = computeSelectableForPlayer(state, player);
+  const selectable = computeSelectableForPlayer(state, player, aiThinking);
   return `<div class="mla-player-card ${isTurn ? "mla-current" : ""} ${selectable ? "mla-decision-focus" : ""}" data-player-id="${player.playerId}">
     <div class="mla-player-head">
       <span>${isTurn ? "▶ " : ""}${player.isAI ? "🤖 " : ""}${esc(player.displayName)}</span>
@@ -182,6 +185,13 @@ export function traitSelectionHtml(state) {
       <p class="mla-muted">둘 중 하나를 골라주세요. 고르지 않은 카드는 이번 게임에서 제외됩니다.</p>
     </div>
     ${cards}`;
+}
+
+// AI 차례에는 사람이 대신 고를 수 있는 버튼을 보여주지 않고, 고르는 중이라고만 알려준다.
+export function aiTraitWaitingHtml(player) {
+  return `<div class="mla-panel mla-center">
+    <p style="font-size:15px">🤖 <b>${esc(player.displayName)}</b>님이 특기를 고르고 있어요...</p>
+  </div>`;
 }
 
 export function variantSelectionHtml(state) {
@@ -270,32 +280,48 @@ function inlineRevealRow(state) {
   return "";
 }
 
-function playAreaHtml(state) {
+function playAreaHtml(state, aiThinking, alreadyFlippedCardId) {
   if (state.playArea.length === 0) {
     return `<div class="mla-panel"><h3>현재 진료 줄</h3><p class="mla-muted">아직 접수한 환자가 없어요.</p></div>`;
   }
   const protectedSet = new Set(state.protectedCardIds);
   const lastIdx = state.playArea.length - 1;
+  // 마지막 카드라도, 이미 한 번 뒤집기 연출을 보여준 카드라면(다른 이유로 재렌더된 것뿐)
+  // 다시 뒤집지 않는다 — 안 그러면 강아지/고양이 결정이 끝난 뒤 재렌더될 때 같은 카드가
+  // "또" 뒤집히는 것처럼 보이는 버그가 있었음.
   const cards = state.playArea
-    .map((cid, i) => cardHtml(cid, { protected: protectedSet.has(cid), flip: i === lastIdx, tension: lastIdx }))
+    .map((cid, i) =>
+      cardHtml(cid, {
+        protected: protectedSet.has(cid),
+        flip: i === lastIdx && cid !== alreadyFlippedCardId,
+        tension: lastIdx,
+      })
+    )
     .join("");
   const lastCard = getCard(state.playArea[lastIdx]);
   const lastAnimal = ANIMALS[lastCard.suit];
 
-  // 결정(원숭이/강아지/고양이/두더지/부엉이 등)이 대기 중이면 그 안내문이 이미 같은 내용을
-  // 더 구체적으로 설명하므로, 일반 능력 한 줄 설명은 생략한다 (안 그러면 "강아지"가 두 번
-  // 나온 것처럼 중복되어 보이는 문제가 있었음).
-  const abilityLine = state.pendingDecision
+  // AI 차례에는 사람이 대신 누를 수 있는 것처럼 보이는 인터랙티브 안내(반짝이는 카드,
+  // "탭하세요" 문구)를 절대 보여주지 않는다 — 실제로 "특기 선택"에서 AI 차례인데도
+  // 사람이 누를 수 있는 버튼이 그대로 떠 있던 버그가 있었음. 대신 고민 중이라고만 알려준다.
+  const showInteractiveDecision = !!state.pendingDecision && !aiThinking;
+
+  // 결정 안내문이 이미 같은 내용을 더 구체적으로 설명하는 경우에는 일반 능력 한 줄 설명을
+  // 생략한다 (안 그러면 "강아지"가 두 번 나온 것처럼 중복되어 보이는 문제가 있었음).
+  const abilityLine = showInteractiveDecision
     ? ""
     : `<p class="mla-ability-line">${lastAnimal.icon} <b>${esc(lastAnimal.name)}</b> — ${esc(lastAnimal.description)}</p>`;
+  const aiNote =
+    aiThinking && state.pendingDecision ? `<p class="mla-muted">🤖 다음 행동을 고민하고 있어요...</p>` : "";
 
   return `<div class="mla-panel">
     <h3>현재 진료 줄</h3>
     <div class="mla-row">${cards}</div>
     ${abilityLine}
+    ${aiNote}
     ${state.protectedCardIds.length ? `<p class="mla-muted">🛡️ 초록 테두리 카드는 거북이가 보호하고 있어요.</p>` : ""}
-    ${inlineRevealRow(state)}
-    ${inlineDecisionBanner(state)}
+    ${showInteractiveDecision ? inlineRevealRow(state) : ""}
+    ${showInteractiveDecision ? inlineDecisionBanner(state) : ""}
   </div>`;
 }
 
@@ -329,15 +355,15 @@ function bustAreaHtml(state, bustInfo) {
   </div>`;
 }
 
-export function gameBoardHtml(state, { bustInfo = null } = {}) {
+export function gameBoardHtml(state, { bustInfo = null, aiThinking = false, alreadyFlippedCardId = null } = {}) {
   // 입원실 순서는 누구 차례인지와 무관하게 항상 고정한다: 내(1번 플레이어) 입원실이 맨 위,
   // 나머지는 자리(플레이) 순서대로. 차례가 바뀔 때마다 패널이 재배치되면 헷갈리기 때문.
   const [me, ...others] = state.players;
-  const area = bustInfo ? bustAreaHtml(state, bustInfo) : playAreaHtml(state);
+  const area = bustInfo ? bustAreaHtml(state, bustInfo) : playAreaHtml(state, aiThinking, alreadyFlippedCardId);
   return `
     ${statusBarHtml(state, bustInfo)}
     ${area}
-    <div class="mla-panel"><h3>입원실 <span class="mla-muted" style="font-weight:400">(카드를 탭하면 능력을 볼 수 있어요)</span></h3>${playerPanelHtml(state, me)}${others.map((p) => playerPanelHtml(state, p)).join("")}</div>
+    <div class="mla-panel"><h3>입원실 <span class="mla-muted" style="font-weight:400">(카드를 탭하면 능력을 볼 수 있어요)</span></h3>${playerPanelHtml(state, me, aiThinking)}${others.map((p) => playerPanelHtml(state, p, aiThinking)).join("")}</div>
   `;
 }
 

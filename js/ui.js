@@ -11,6 +11,7 @@ import {
   setupScreenHtml,
   nameFieldsHtml,
   traitSelectionHtml,
+  aiTraitWaitingHtml,
   variantSelectionHtml,
   veilHtml,
   gameBoardHtml,
@@ -22,6 +23,7 @@ let revealedGateKey = null;
 let pendingBust = null; // 대소동이 나면 진료 줄 자리에서 어떤 카드 때문인지 잠깐 보여준다
 let aiTimer = null;
 let bustTimer = null;
+let lastFlippedCardId = null; // 이미 뒤집기 연출을 보여준 카드 — 재렌더 때 또 뒤집지 않으려고 기록
 
 const AI_THINK_DELAY_MS = 1300; // 사람처럼 살짝 고민하는 느낌
 const BUST_AUTO_DISMISS_MS = 2600;
@@ -58,15 +60,28 @@ function currentActor() {
   return id ? game.players.find((p) => p.playerId === id) : null;
 }
 
-// AI 차례에는 다른 사람에게 숨길 정보가 없으므로(감출 대상이 없음) 가림막을 생략한다.
+// 진료 줄의 마지막 카드가 "새로 나온" 카드인지 추적한다. 같은 카드가 계속 마지막 자리에
+// 있는 채로 다른 이유(결정 처리 등)로 재렌더되면, 뒤집기 연출을 또 재생하지 않도록
+// 그 카드 id를 반환해 억제한다(처음 나타날 땐 null을 반환해 정상적으로 뒤집힌다).
+function computeFlipTarget() {
+  if (!game || game.playArea.length === 0) {
+    lastFlippedCardId = null;
+    return null;
+  }
+  const currentLast = game.playArea[game.playArea.length - 1];
+  if (currentLast === lastFlippedCardId) return currentLast;
+  lastFlippedCardId = currentLast;
+  return null;
+}
+
+// 정말로 숨길 가치가 있는 정보만 가린다: 부엉이가 몰래 본 카드(그 턴 안에서만 의미있는
+// 진짜 히든 정보). 수의사 특기는 고른 즉시 모두에게 공개되는 정보라(입원실에 항상 표시됨)
+// 굳이 선택 전에 가릴 이유가 없어서 가림막을 두지 않는다.
 function currentGateKey() {
   if (!game) return null;
   const actor = currentActor();
   if (actor && actor.isAI) return null;
 
-  if (game.phase === "trait_selection" && game.pendingDecision) {
-    return "trait:" + game.pendingDecision.playerId;
-  }
   if (game.pendingDecision && game.pendingDecision.type === "owl_choose") {
     return "owl:" + game.pendingDecision.playerId + ":" + game.pendingDecision.previewCardIds.join(",");
   }
@@ -91,21 +106,24 @@ function render() {
 
   const gateKey = currentGateKey();
   if (gateKey && revealedGateKey !== gateKey) {
-    const label = game.phase === "trait_selection" ? "특기를 선택할 차례예요" : "부엉이가 카드를 확인했어요";
-    gameArea().innerHTML = veilHtml(label);
+    gameArea().innerHTML = veilHtml("부엉이가 카드를 확인했어요");
     renderActionBar();
     return;
   }
 
+  const actor = currentActor();
   if (game.phase === "trait_selection") {
-    gameArea().innerHTML = traitSelectionHtml(game);
+    gameArea().innerHTML = actor && actor.isAI ? aiTraitWaitingHtml(actor) : traitSelectionHtml(game);
   } else if (game.phase === "variant_selection") {
     gameArea().innerHTML = variantSelectionHtml(game);
   } else if (game.phase === "game_over") {
     gameArea().innerHTML = gameOverHtml(game);
     clearGame();
   } else {
-    gameArea().innerHTML = gameBoardHtml(game);
+    gameArea().innerHTML = gameBoardHtml(game, {
+      aiThinking: !!(actor && actor.isAI),
+      alreadyFlippedCardId: computeFlipTarget(),
+    });
   }
   renderActionBar();
   scheduleAiIfNeeded();
