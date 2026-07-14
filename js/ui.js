@@ -13,13 +13,11 @@ import {
   traitSelectionHtml,
   aiTraitWaitingHtml,
   variantSelectionHtml,
-  veilHtml,
   gameBoardHtml,
   gameOverHtml,
 } from "./ui/render.js";
 
 let game = null;
-let revealedGateKey = null;
 let pendingBust = null; // 대소동이 나면 진료 줄 자리에서 어떤 카드 때문인지 잠깐 보여준다
 let aiTimer = null;
 let bustTimer = null;
@@ -74,20 +72,6 @@ function computeFlipTarget() {
   return null;
 }
 
-// 정말로 숨길 가치가 있는 정보만 가린다: 부엉이가 몰래 본 카드(그 턴 안에서만 의미있는
-// 진짜 히든 정보). 수의사 특기는 고른 즉시 모두에게 공개되는 정보라(입원실에 항상 표시됨)
-// 굳이 선택 전에 가릴 이유가 없어서 가림막을 두지 않는다.
-function currentGateKey() {
-  if (!game) return null;
-  const actor = currentActor();
-  if (actor && actor.isAI) return null;
-
-  if (game.pendingDecision && game.pendingDecision.type === "owl_choose") {
-    return "owl:" + game.pendingDecision.playerId + ":" + game.pendingDecision.previewCardIds.join(",");
-  }
-  return null;
-}
-
 function render() {
   if (!game) {
     gameArea().innerHTML = setupScreenHtml();
@@ -101,13 +85,6 @@ function render() {
     gameArea().innerHTML = gameBoardHtml(game, { bustInfo: pendingBust });
     renderActionBar();
     scheduleBustAutoDismiss();
-    return;
-  }
-
-  const gateKey = currentGateKey();
-  if (gateKey && revealedGateKey !== gateKey) {
-    gameArea().innerHTML = veilHtml("부엉이가 카드를 확인했어요");
-    renderActionBar();
     return;
   }
 
@@ -136,7 +113,6 @@ function renderActionBar() {
 
   if (!game || pendingBust) return;
   if (game.phase === "game_over" || game.phase === "trait_selection" || game.phase === "variant_selection") return;
-  if (currentGateKey() && revealedGateKey !== currentGateKey()) return;
 
   const actor = currentActor();
   if (actor && actor.isAI) {
@@ -195,7 +171,6 @@ function onSubmit(e) {
     useTraits: data.get("useTraits") === "on",
     variantMode: data.get("variantMode") || "none",
   });
-  revealedGateKey = null;
   pendingBust = null;
   persistAndRender();
 }
@@ -218,12 +193,6 @@ function onClick(e) {
 function handleActionClick(btn) {
   const action = btn.getAttribute("data-action");
 
-  if (action === "reveal-gate") {
-    revealedGateKey = currentGateKey();
-    playSfx(HOSPITAL, "tap");
-    render();
-    return;
-  }
   if (action === "dismiss-bust") {
     dismissBust();
     return;
@@ -232,7 +201,6 @@ function handleActionClick(btn) {
     clearTimeout(aiTimer);
     clearTimeout(bustTimer);
     game = null;
-    revealedGateKey = null;
     pendingBust = null;
     clearGame();
     render();
@@ -269,7 +237,6 @@ function commitAction(engineAction) {
   const bustEntry = newEntries.find((entry) => entry.type === "bust");
   const bankEntry = newEntries.find((entry) => entry.type === "bank");
   feedbackFor(engineAction, bustEntry, bankEntry);
-  revealedGateKey = null;
   if (bustEntry) pendingBust = bustEntry;
   persistAndRender();
 }

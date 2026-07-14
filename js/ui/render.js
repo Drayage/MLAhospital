@@ -214,14 +214,6 @@ export function variantSelectionHtml(state) {
   </div>`;
 }
 
-export function veilHtml(label) {
-  return `<div class="mla-hidden-veil">
-    <p>🙈 <b>${esc(label)}</b></p>
-    <p class="mla-muted">다른 분은 화면을 보지 말아주세요.</p>
-    <button class="mla-choice-btn" data-action="reveal-gate" style="text-align:center;font-weight:700;">탭해서 확인하기</button>
-  </div>`;
-}
-
 function statusBarHtml(state, bustInfo) {
   const player = bustInfo ? state.players.find((p) => p.playerId === bustInfo.playerId) : state.players[state.currentPlayerIndex];
   const variant = state.activeVariantId ? VARIANTS[state.activeVariantId] : null;
