@@ -4,6 +4,7 @@ import { getLegalActions, applyAction } from "./engine/actions.js";
 import { saveGame, loadGame, clearGame } from "./storage.js";
 import { playSfx, startBgm } from "./audio.js";
 import { HOSPITAL } from "./palettes.js";
+import { ANIMALS } from "./data/animals.js";
 import { chooseAiAction } from "./ai.js";
 import {
   setupScreenHtml,
@@ -13,17 +14,16 @@ import {
   veilHtml,
   gameBoardHtml,
   gameOverHtml,
-  bustRevealHtml,
 } from "./ui/render.js";
 
 let game = null;
 let revealedGateKey = null;
-let pendingBust = null; // 대소동이 나면 화면을 멈추고 어떤 카드 때문인지 보여준다
+let pendingBust = null; // 대소동이 나면 진료 줄 자리에서 어떤 카드 때문인지 잠깐 보여준다
 let aiTimer = null;
 let bustTimer = null;
 
-const AI_THINK_DELAY_MS = 650;
-const BUST_AUTO_DISMISS_MS = 2400;
+const AI_THINK_DELAY_MS = 1300; // 사람처럼 살짝 고민하는 느낌
+const BUST_AUTO_DISMISS_MS = 2600;
 
 const gameArea = () => document.getElementById("game-area");
 const actionBar = () => document.getElementById("action-bar");
@@ -80,8 +80,9 @@ function render() {
     return;
   }
 
+  // 대소동은 화면을 통째로 바꾸지 않고, 보드 안 진료 줄 자리에서 그대로 보여준다.
   if (pendingBust) {
-    gameArea().innerHTML = bustRevealHtml(game, pendingBust);
+    gameArea().innerHTML = gameBoardHtml(game, { bustInfo: pendingBust });
     renderActionBar();
     scheduleBustAutoDismiss();
     return;
@@ -123,7 +124,7 @@ function renderActionBar() {
     const thinking = document.createElement("span");
     thinking.className = "mla-pill mla-pill-soft";
     thinking.setAttribute("data-mla-main", "1");
-    thinking.textContent = `🤖 ${actor.displayName}님이 진료 중...`;
+    thinking.textContent = `🤖 ${actor.displayName}님이 고민 중...`;
     bar.insertBefore(thinking, rulesBtn);
     return;
   }
@@ -181,8 +182,20 @@ function onSubmit(e) {
 }
 
 function onClick(e) {
-  const btn = e.target.closest("[data-action]");
-  if (!btn) return;
+  const actionBtn = e.target.closest("[data-action]");
+  if (actionBtn) {
+    handleActionClick(actionBtn);
+    return;
+  }
+  // 능력 버튼이 아니면: 카드(내 것이든 남의 것이든, 빈 칸이든)를 탭했을 때 한 줄 설명을 보여준다.
+  const infoEl = e.target.closest("[data-info-suit]");
+  if (infoEl) {
+    playSfx(HOSPITAL, "tap");
+    showAbilityInfo(infoEl.getAttribute("data-info-suit"));
+  }
+}
+
+function handleActionClick(btn) {
   const action = btn.getAttribute("data-action");
 
   if (action === "reveal-gate") {
@@ -242,7 +255,7 @@ function commitAction(engineAction) {
 
 function feedbackFor(action, bustEntry) {
   if (bustEntry) {
-    // 전용 대소동 화면(bustRevealHtml)이 이미 상세히 보여주므로 토스트는 생략한다.
+    // 진료 줄 안에서 바로 보여주므로(흔들림+배지) 별도 토스트는 생략한다.
     playSfx(HOSPITAL, "error");
   } else if (action.type === "BANK") {
     playSfx(HOSPITAL, "confirm");
@@ -259,11 +272,17 @@ function scheduleBustAutoDismiss() {
   bustTimer = setTimeout(dismissBust, BUST_AUTO_DISMISS_MS);
 }
 
+// 귀가하는 카드들을 살짝 날아가듯 사라지게 한 뒤(순수 DOM 트릭) 다음 상태를 렌더한다.
 function dismissBust() {
   clearTimeout(bustTimer);
   if (!pendingBust) return;
-  pendingBust = null;
-  render();
+  const lostEls = document.querySelectorAll('[data-bust-card="lost"]');
+  lostEls.forEach((el) => el.classList.add("mla-card-leaving"));
+  const wait = lostEls.length ? 260 : 0;
+  setTimeout(() => {
+    pendingBust = null;
+    render();
+  }, wait);
 }
 
 // 현재 결정권자가 AI면 잠시 후 스스로 행동을 골라 진행한다 (사람처럼 약간의 텀을 둔다).
@@ -281,10 +300,22 @@ function scheduleAiIfNeeded() {
 function showToast(msg) {
   const el = document.getElementById("mla-toast");
   if (!el) return;
+  el.classList.remove("mla-toast-info");
   el.textContent = msg;
   el.classList.add("mla-show");
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => el.classList.remove("mla-show"), 1600);
+}
+
+function showAbilityInfo(suit) {
+  const animal = ANIMALS[suit];
+  if (!animal) return;
+  const el = document.getElementById("mla-toast");
+  if (!el) return;
+  el.textContent = `${animal.icon} ${animal.name} — ${animal.description}`;
+  el.classList.add("mla-show", "mla-toast-info");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove("mla-show", "mla-toast-info"), 2800);
 }
 
 function persistAndRender() {

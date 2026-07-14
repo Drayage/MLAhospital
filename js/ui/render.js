@@ -10,42 +10,88 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// opts.flip: 뒷면 상태로 나타났다가 실제 얼굴로 뒤집히는 연출 (카드 공개 순간의 긴장감용).
+// opts:
+//  protected/ghost/dim — 카드 상태 스타일
+//  badge — 우측 상단 배지 텍스트
+//  flip/tension — 뒷면에서 앞면으로 뒤집히는 연출. tension이 클수록(진료 줄이 길수록) 천천히 뒤집힌다.
+//  decideValue — 있으면 카드 자체가 버튼이 되어 탭하면 DECIDE 행동이 실행된다 (자연스러운 직접 선택)
+//  lost/triggering — 대소동 연출용
 export function cardHtml(cardId, opts = {}) {
   const card = getCard(cardId);
   const animal = ANIMALS[card.suit];
   const cls = ["mla-suit-card"];
   if (opts.protected) cls.push("mla-protected");
   if (opts.ghost) cls.push("mla-ghost");
-  const badge = opts.badge ? `<span class="mla-badge">${esc(opts.badge)}</span>` : "";
+  if (opts.dim) cls.push("mla-dim");
+  if (opts.decideValue !== undefined) cls.push("mla-selectable");
+  if (opts.lost) cls.push("mla-bust-lost");
+  if (opts.triggering) cls.push("mla-bust-trigger");
+
+  const attrs = [`title="${esc(animal.name)} ${card.value} — ${esc(animal.description)}"`, `data-info-suit="${card.suit}"`];
+  if (opts.decideValue !== undefined) attrs.push(`data-action="decide"`, `data-value='${esc(JSON.stringify(opts.decideValue))}'`);
+  if (opts.lost) attrs.push(`data-bust-card="lost"`);
+
+  const badgeText = opts.badge || (opts.triggering ? "!" : "");
+  const badge = badgeText ? `<span class="mla-badge">${esc(badgeText)}</span>` : "";
   const faceInner = `${badge}<div class="mla-icon">${animal.icon}</div><div class="mla-value">${card.value}</div>`;
+  const attrStr = attrs.join(" ");
 
   if (opts.flip) {
-    return `<div class="mla-flip-outer">
-      <div class="mla-flip-inner">
+    const tension = Math.min(opts.tension || 0, 9);
+    const dur = (0.42 + tension * 0.07).toFixed(2);
+    const delay = (0.12 + tension * 0.045).toFixed(2);
+    return `<div class="mla-flip-outer" ${attrStr}>
+      <div class="mla-flip-inner" style="animation-duration:${dur}s;animation-delay:${delay}s;">
         <div class="mla-flip-face mla-flip-back">🐾</div>
-        <div class="mla-flip-face mla-flip-front ${cls.join(" ")}" title="${esc(animal.name)} ${card.value}">${faceInner}</div>
+        <div class="mla-flip-face mla-flip-front ${cls.join(" ")}">${faceInner}</div>
       </div>
     </div>`;
   }
-  return `<div class="${cls.join(" ")}" title="${esc(animal.name)} ${card.value}">${faceInner}</div>`;
+  return `<div class="${cls.join(" ")}" ${attrStr}>${faceInner}</div>`;
 }
 
-function emptySuitSlotHtml(suit) {
+function emptySuitSlotHtml(suit, opts = {}) {
   const animal = ANIMALS[suit];
-  return `<div class="mla-suit-card mla-ghost" title="${esc(animal.name)} 없음">
+  const cls = ["mla-suit-card", "mla-ghost"];
+  if (opts.dim) cls.push("mla-dim");
+  return `<div class="${cls.join(" ")}" data-info-suit="${suit}" title="${esc(animal.name)} — ${esc(animal.description)}">
     <div class="mla-icon">${animal.icon}</div>
     <div class="mla-value">-</div>
   </div>`;
 }
 
-export function hospitalHtml(player, { showAll = true } = {}) {
+// 지금 대기 중인 결정이 이 플레이어의 입원실 카드를 대상으로 하는지 계산.
+// null이면 이 플레이어와 무관(평소처럼 렌더), Map이면 종류별로 탭 가능한 값이 담긴다.
+function computeSelectableForPlayer(state, player) {
+  const d = state.pendingDecision;
+  if (!d) return null;
+  if (d.type === "monkey_choose_card" && d.playerId === player.playerId) {
+    const map = new Map();
+    for (const cid of d.options) map.set(getCard(cid).suit, cid);
+    return map;
+  }
+  if (d.type === "dog_choose_target" || d.type === "cat_choose_target") {
+    const relevant = d.options.filter((opt) => opt.opponentId === player.playerId);
+    if (relevant.length === 0) return null;
+    const map = new Map();
+    for (const opt of relevant) map.set(opt.suit, opt);
+    return map;
+  }
+  return null;
+}
+
+export function hospitalHtml(player, { showAll = true, selectable = null } = {}) {
   return SUITS.map((suit) => {
     const stack = player.hospitalStacks[suit];
-    if (!stack || stack.length === 0) return showAll ? emptySuitSlotHtml(suit) : "";
+    const isTarget = !!(selectable && selectable.has(suit));
+    const dim = !!selectable && !isTarget;
+    if (!stack || stack.length === 0) {
+      if (!showAll) return "";
+      return emptySuitSlotHtml(suit, { dim });
+    }
     const topId = getTopCardId(stack);
     const badge = stack.length > 1 ? `×${stack.length}` : "";
-    return cardHtml(topId, { badge });
+    return cardHtml(topId, { badge, dim, decideValue: isTarget ? selectable.get(suit) : undefined });
   }).join("");
 }
 
@@ -53,13 +99,14 @@ export function playerPanelHtml(state, player) {
   const isTurn = player.isCurrentPlayer;
   const score = computeScore(state, player);
   const traitName = player.traitId ? TRAITS[player.traitId].name : null;
-  return `<div class="mla-player-card ${isTurn ? "mla-current" : ""}" data-player-id="${player.playerId}">
+  const selectable = computeSelectableForPlayer(state, player);
+  return `<div class="mla-player-card ${isTurn ? "mla-current" : ""} ${selectable ? "mla-decision-focus" : ""}" data-player-id="${player.playerId}">
     <div class="mla-player-head">
       <span>${isTurn ? "▶ " : ""}${player.isAI ? "🤖 " : ""}${esc(player.displayName)}</span>
       <span class="mla-pill mla-pill-soft">점수 ${score}</span>
     </div>
     ${traitName ? `<div class="mla-muted">특기: ${esc(traitName)}</div>` : ""}
-    <div class="mla-row">${hospitalHtml(player)}</div>
+    <div class="mla-row">${hospitalHtml(player, { selectable })}</div>
   </div>`;
 }
 
@@ -159,21 +206,62 @@ export function veilHtml(label) {
   </div>`;
 }
 
-function statusBarHtml(state) {
-  const player = state.players[state.currentPlayerIndex];
+function statusBarHtml(state, bustInfo) {
+  const player = bustInfo ? state.players.find((p) => p.playerId === bustInfo.playerId) : state.players[state.currentPlayerIndex];
   const variant = state.activeVariantId ? VARIANTS[state.activeVariantId] : null;
   return `<div class="mla-panel">
     <div class="mla-row" style="justify-content:space-between; align-items:center;">
-      <span class="mla-pill">${esc(player.displayName)}님 진료 중</span>
+      <span class="mla-pill ${bustInfo ? "mla-pill-warn" : ""}">${player.isAI ? "🤖 " : ""}${esc(player.displayName)}님 ${bustInfo ? "대소동 발생!" : "진료 중"}</span>
       <span class="mla-muted">대기실 덱 ${state.drawPile.length}장 · 귀가 더미 ${state.discardPile.length}장</span>
     </div>
     ${variant ? `<div class="mla-muted" style="margin-top:6px">오늘의 규칙: <b>${esc(variant.name)}</b> — ${esc(variant.description)}</div>` : ""}
     ${
-      state.requiredExtraDraws > 0
+      !bustInfo && state.requiredExtraDraws > 0
         ? `<div class="mla-pill mla-pill-warn" style="margin-top:6px">🐰 토끼 가족이 몰려왔습니다! 환자를 ${state.requiredExtraDraws}가족 더 접수해야 합니다.</div>`
         : ""
     }
   </div>`;
+}
+
+// 원숭이/강아지/고양이는 입원실 카드를 직접 탭해 선택하므로, 여기서는 짧은 안내문만 보여준다.
+function inlineDecisionBanner(state) {
+  const d = state.pendingDecision;
+  if (!d) return "";
+  const messages = {
+    monkey_choose_card: "🐵 원숭이 능력 — 아래 <b>내 입원실</b>에서 반짝이는 카드를 탭해 데려오세요.",
+    dog_choose_target: "🐶 강아지 능력 — 아래 <b>상대 입원실</b>에서 반짝이는 카드를 탭해 귀가시키세요.",
+    cat_choose_target: "🐱 고양이 능력 — 아래 <b>상대 입원실</b>에서 반짝이는 카드를 탭해 데려오세요.",
+  };
+  return messages[d.type] ? `<p class="mla-decision-banner">${messages[d.type]}</p>` : "";
+}
+
+// 두더지/부엉이는 진료 줄 밖(귀가 더미/대기실 덱)에서 카드를 꺼내오므로, 그 카드를 여기서 바로 보여주고
+// 탭하면 선택되게 한다 (별도 팝업 없이 진료 줄의 자연스러운 연장처럼 보이게).
+function inlineRevealRow(state) {
+  const d = state.pendingDecision;
+  if (!d) return "";
+  const tension = state.playArea.length;
+  if (d.type === "mole_choose_card") {
+    const cards = d.options.map((cid) => cardHtml(cid, { flip: true, tension, decideValue: cid })).join("");
+    return `<div class="mla-reveal-row">
+      <p class="mla-decision-banner">🦔 두더지 능력 — 귀가 더미에서 나온 카드 중 하나를 탭해 접수하세요.</p>
+      <div class="mla-row">${cards}</div>
+    </div>`;
+  }
+  if (d.type === "owl_choose") {
+    const cards = d.previewCardIds
+      .map((cid) => cardHtml(cid, { flip: true, tension, decideValue: { action: "take", cardId: cid } }))
+      .join("");
+    const bankLine = d.canBank
+      ? `<button class="mla-inline-link" data-action="decide" data-value='${esc(JSON.stringify({ action: "bank" }))}'>또는, 지금 바로 진료 마치기</button>`
+      : `<p class="mla-muted">토끼 강제 접수 중에는 지금 진료를 마칠 수 없어요.</p>`;
+    return `<div class="mla-reveal-row">
+      <p class="mla-decision-banner">🦉 부엉이 능력 — 다음 카드를 몰래 확인했어요. 접수하려면 카드를 탭하세요.</p>
+      <div class="mla-row">${cards}</div>
+      ${bankLine}
+    </div>`;
+  }
+  return "";
 }
 
 function playAreaHtml(state) {
@@ -183,69 +271,18 @@ function playAreaHtml(state) {
   const protectedSet = new Set(state.protectedCardIds);
   const lastIdx = state.playArea.length - 1;
   const cards = state.playArea
-    .map((cid, i) => cardHtml(cid, { protected: protectedSet.has(cid), flip: i === lastIdx }))
+    .map((cid, i) => cardHtml(cid, { protected: protectedSet.has(cid), flip: i === lastIdx, tension: lastIdx }))
     .join("");
+  const lastCard = getCard(state.playArea[lastIdx]);
+  const lastAnimal = ANIMALS[lastCard.suit];
+
   return `<div class="mla-panel">
     <h3>현재 진료 줄</h3>
     <div class="mla-row">${cards}</div>
+    <p class="mla-ability-line">${lastAnimal.icon} <b>${esc(lastAnimal.name)}</b> — ${esc(lastAnimal.description)}</p>
     ${state.protectedCardIds.length ? `<p class="mla-muted">🛡️ 초록 테두리 카드는 거북이가 보호하고 있어요.</p>` : ""}
-  </div>`;
-}
-
-function decisionHtml(state) {
-  const d = state.pendingDecision;
-  if (!d) return "";
-  switch (d.type) {
-    case "monkey_choose_card":
-      return decisionWrap(
-        "🐵 원숭이 능력 — 입원실에서 데려올 카드를 고르세요",
-        d.options.map((cid) => `<button class="mla-choice-btn" data-action="decide" data-value='${JSON.stringify(cid)}'>${cardLabel(cid)}</button>`).join("")
-      );
-    case "dog_choose_target":
-      return decisionWrap(
-        "🐶 강아지 능력 — 어느 병원의 어떤 종류를 귀가시킬까요?",
-        d.options
-          .map((opt) => {
-            const opp = state.players.find((p) => p.playerId === opt.opponentId);
-            return `<button class="mla-choice-btn" data-action="decide" data-value='${JSON.stringify(opt)}'>${esc(opp.displayName)}님의 ${esc(ANIMALS[opt.suit].name)}</button>`;
-          })
-          .join("")
-      );
-    case "cat_choose_target":
-      return decisionWrap(
-        "🐱 고양이 능력 — 어느 병원의 어떤 종류를 데려올까요?",
-        d.options
-          .map((opt) => {
-            const opp = state.players.find((p) => p.playerId === opt.opponentId);
-            return `<button class="mla-choice-btn" data-action="decide" data-value='${JSON.stringify(opt)}'>${esc(opp.displayName)}님의 ${esc(ANIMALS[opt.suit].name)}</button>`;
-          })
-          .join("")
-      );
-    case "mole_choose_card":
-      return decisionWrap(
-        "🦔 두더지 능력 — 귀가 더미에서 접수할 카드를 고르세요",
-        `<div class="mla-row">${d.options.map((cid) => cardHtml(cid, { flip: true })).join("")}</div>` +
-          d.options.map((cid) => `<button class="mla-choice-btn" data-action="decide" data-value='${JSON.stringify(cid)}'>${cardLabel(cid)} 접수하기</button>`).join("")
-      );
-    case "owl_choose": {
-      const preview = d.previewCardIds.map((cid) => cardHtml(cid, { flip: true })).join("");
-      const takeButtons = d.previewCardIds
-        .map((cid) => `<button class="mla-choice-btn" data-action="decide" data-value='${JSON.stringify({ action: "take", cardId: cid })}'>${cardLabel(cid)} 접수하기</button>`)
-        .join("");
-      const bankButton = d.canBank
-        ? `<button class="mla-choice-btn" data-action="decide" data-value='${JSON.stringify({ action: "bank" })}'>지금 진료 마치기</button>`
-        : `<p class="mla-muted">토끼 강제 접수 중에는 지금 진료를 마칠 수 없어요.</p>`;
-      return decisionWrap("🦉 부엉이 능력 — 다음 카드를 몰래 확인했어요", `<div class="mla-row">${preview}</div>${takeButtons}${bankButton}`);
-    }
-    default:
-      return "";
-  }
-}
-
-function decisionWrap(title, body) {
-  return `<div class="mla-panel" style="border-color:var(--accent-strong)">
-    <h3>${title}</h3>
-    ${body}
+    ${inlineRevealRow(state)}
+    ${inlineDecisionBanner(state)}
   </div>`;
 }
 
@@ -254,43 +291,39 @@ export function cardLabel(cardId) {
   return `${ANIMALS[card.suit].icon} ${esc(ANIMALS[card.suit].name)} ${card.value}`;
 }
 
-// 대소동 발생 시 화면을 멈추고 어떤 카드 때문에 터졌는지 보여주는 전용 화면.
-export function bustRevealHtml(state, bustEntry) {
-  const player = state.players.find((p) => p.playerId === bustEntry.playerId);
-  const protectedIds = bustEntry.protectedCardIds || [];
-  const lostIds = bustEntry.lostCardIds || [];
-  const orderedIds = [...protectedIds, ...lostIds];
-  const cards = orderedIds
+// 대소동 순간의 진료 줄 — 화면을 통째로 바꾸지 않고 같은 자리에서 무엇이 터졌는지 보여준다.
+function bustAreaHtml(state, bustInfo) {
+  const player = state.players.find((p) => p.playerId === bustInfo.playerId);
+  const protectedIds = bustInfo.protectedCardIds || [];
+  const lostIds = bustInfo.lostCardIds || [];
+  const cards = [...protectedIds, ...lostIds]
     .map((cid) =>
       cardHtml(cid, {
         protected: protectedIds.includes(cid),
-        badge: cid === bustEntry.triggeringCardId ? "!" : "",
+        lost: lostIds.includes(cid),
+        triggering: cid === bustInfo.triggeringCardId,
       })
     )
     .join("");
-  return `<div class="mla-panel mla-center mla-bust-panel">
-      <h2>😱 진료실 대소동!</h2>
-      <p>${player.isAI ? "🤖 " : ""}${esc(player.displayName)}님의 진료 줄에 <b>${cardLabel(bustEntry.triggeringCardId)}</b>가 겹쳐서 대소동이 났어요!</p>
-    </div>
-    <div class="mla-panel">
-      <div class="mla-row">${cards}</div>
-      ${
-        protectedIds.length
-          ? `<p class="mla-muted">🛡️ 초록 테두리 = 거북이 등으로 보호되어 입원 · 나머지는 귀가 더미로</p>`
-          : `<p class="mla-muted">이번엔 보호된 카드가 없어서 전부 귀가 더미로 갔어요.</p>`
-      }
-    </div>
-    <button class="mla-choice-btn" data-action="dismiss-bust" style="text-align:center;font-weight:700;">계속하기</button>`;
+  return `<div class="mla-panel">
+    <h3>현재 진료 줄</h3>
+    <div class="mla-bust-banner">😱 ${cardLabel(bustInfo.triggeringCardId)}가 겹쳐서 대소동이 났어요!</div>
+    <div class="mla-row">${cards}</div>
+    <p class="mla-muted">
+      ${protectedIds.length ? "🛡️ 초록 테두리는 보호되어 입원, " : ""}흐려진 카드는 귀가 더미로 갑니다.
+    </p>
+    <button class="mla-bust-continue" data-action="dismiss-bust">계속하기</button>
+  </div>`;
 }
 
-export function gameBoardHtml(state) {
+export function gameBoardHtml(state, { bustInfo = null } = {}) {
   const others = state.players.filter((p) => !p.isCurrentPlayer);
   const me = state.players.find((p) => p.isCurrentPlayer);
+  const area = bustInfo ? bustAreaHtml(state, bustInfo) : playAreaHtml(state);
   return `
-    ${statusBarHtml(state)}
-    ${playAreaHtml(state)}
-    ${decisionHtml(state)}
-    <div class="mla-panel"><h3>입원실</h3>${playerPanelHtml(state, me)}${others.map((p) => playerPanelHtml(state, p)).join("")}</div>
+    ${statusBarHtml(state, bustInfo)}
+    ${area}
+    <div class="mla-panel"><h3>입원실 <span class="mla-muted" style="font-weight:400">(카드를 탭하면 능력을 볼 수 있어요)</span></h3>${playerPanelHtml(state, me)}${others.map((p) => playerPanelHtml(state, p)).join("")}</div>
   `;
 }
 
