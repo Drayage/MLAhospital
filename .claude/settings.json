@@ -1,0 +1,9 @@
+{
+  "extraKnownMarketplaces": {
+    "drayage-kit": {
+      "source": { "source": "github", "repo": "Drayage/game-baserule" },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": { "game-kit@drayage-kit": true }
+}

@@ -1,0 +1,203 @@
+// 컨트롤러 — 게임 엔진과 화면을 잇는다. 규칙 로직은 절대 여기 두지 않는다.
+import { createGame } from "./engine/state.js";
+import { getLegalActions, applyAction } from "./engine/actions.js";
+import { saveGame, loadGame, clearGame } from "./storage.js";
+import { playSfx, startBgm } from "./audio.js";
+import { HOSPITAL } from "./palettes.js";
+import {
+  setupScreenHtml,
+  nameFieldsHtml,
+  traitSelectionHtml,
+  variantSelectionHtml,
+  veilHtml,
+  gameBoardHtml,
+  gameOverHtml,
+} from "./ui/render.js";
+
+let game = null;
+let revealedGateKey = null;
+
+const gameArea = () => document.getElementById("game-area");
+const actionBar = () => document.getElementById("action-bar");
+
+export function startApp() {
+  document.addEventListener("click", onClick);
+  document.addEventListener("submit", onSubmit);
+  document.addEventListener("change", onChange);
+
+  const saved = loadGame();
+  if (saved && saved.phase && saved.phase !== "game_over") {
+    game = saved;
+  }
+  render();
+}
+
+function currentGateKey() {
+  if (!game) return null;
+  if (game.phase === "trait_selection" && game.pendingDecision) {
+    return "trait:" + game.pendingDecision.playerId;
+  }
+  if (game.pendingDecision && game.pendingDecision.type === "owl_choose") {
+    return "owl:" + game.pendingDecision.playerId + ":" + game.pendingDecision.previewCardIds.join(",");
+  }
+  return null;
+}
+
+function render() {
+  if (!game) {
+    gameArea().innerHTML = setupScreenHtml();
+    regenNameFields();
+    renderActionBar();
+    return;
+  }
+
+  const gateKey = currentGateKey();
+  if (gateKey && revealedGateKey !== gateKey) {
+    const label = game.phase === "trait_selection" ? "특기를 선택할 차례예요" : "부엉이가 카드를 확인했어요";
+    gameArea().innerHTML = veilHtml(label);
+    renderActionBar();
+    return;
+  }
+
+  if (game.phase === "trait_selection") {
+    gameArea().innerHTML = traitSelectionHtml(game);
+  } else if (game.phase === "variant_selection") {
+    gameArea().innerHTML = variantSelectionHtml(game);
+  } else if (game.phase === "game_over") {
+    gameArea().innerHTML = gameOverHtml(game);
+    clearGame();
+  } else {
+    gameArea().innerHTML = gameBoardHtml(game);
+  }
+  renderActionBar();
+}
+
+function renderActionBar() {
+  const bar = actionBar();
+  const rulesBtn = document.getElementById("rules-btn");
+  bar.querySelectorAll("[data-mla-main]").forEach((el) => el.remove());
+
+  if (!game || game.phase === "game_over" || game.phase === "trait_selection" || game.phase === "variant_selection") return;
+  if (currentGateKey() && revealedGateKey !== currentGateKey()) return;
+
+  const legal = getLegalActions(game);
+  const canDraw = legal.some((a) => a.type === "DRAW");
+  const canBank = legal.some((a) => a.type === "BANK");
+
+  const drawBtn = document.createElement("button");
+  drawBtn.textContent = game.playArea.length === 0 ? "진료 시작하기" : "환자 더 받기";
+  drawBtn.setAttribute("data-mla-main", "1");
+  drawBtn.setAttribute("data-action", "draw");
+  drawBtn.disabled = !canDraw;
+
+  const bankBtn = document.createElement("button");
+  bankBtn.textContent = "진료 마치기";
+  bankBtn.className = "mla-bank-btn";
+  bankBtn.setAttribute("data-mla-main", "1");
+  bankBtn.setAttribute("data-action", "bank");
+  bankBtn.disabled = !canBank;
+
+  bar.insertBefore(drawBtn, rulesBtn);
+  bar.insertBefore(bankBtn, rulesBtn);
+}
+
+function regenNameFields() {
+  const countSelect = document.getElementById("mla-player-count");
+  if (!countSelect) return;
+  document.getElementById("mla-name-fields").innerHTML = nameFieldsHtml(Number(countSelect.value));
+}
+
+function onChange(e) {
+  if (e.target && e.target.id === "mla-player-count") regenNameFields();
+}
+
+function onSubmit(e) {
+  const form = e.target.closest("#mla-setup-form");
+  if (!form) return;
+  e.preventDefault();
+  const data = new FormData(form);
+  const playerNames = data.getAll("playerName").map((s) => s.trim() || "플레이어").slice(0, Number(data.get("playerCount")));
+  startBgm(HOSPITAL, "main");
+  game = createGame({
+    playerNames,
+    useTraits: data.get("useTraits") === "on",
+    variantMode: data.get("variantMode") || "none",
+  });
+  revealedGateKey = null;
+  persistAndRender();
+}
+
+function onClick(e) {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.getAttribute("data-action");
+
+  if (action === "reveal-gate") {
+    revealedGateKey = currentGateKey();
+    playSfx(HOSPITAL, "tap");
+    render();
+    return;
+  }
+  if (action === "new-game") {
+    game = null;
+    revealedGateKey = null;
+    clearGame();
+    render();
+    return;
+  }
+  if (btn.closest("#mla-setup-form")) return; // submit이 처리
+
+  if (!game) return;
+
+  let engineAction = null;
+  if (action === "draw") engineAction = { type: "DRAW" };
+  else if (action === "bank") engineAction = { type: "BANK" };
+  else if (action === "select-trait") engineAction = { type: "SELECT_TRAIT", traitId: btn.getAttribute("data-trait-id") };
+  else if (action === "select-variant") engineAction = { type: "SELECT_VARIANT", variantId: btn.getAttribute("data-variant-id") };
+  else if (action === "confirm-variant") engineAction = { type: "CONFIRM_VARIANT" };
+  else if (action === "decide") engineAction = { type: "DECIDE", value: JSON.parse(btn.getAttribute("data-value")) };
+  if (!engineAction) return;
+
+  const wasPhase = game.phase;
+  const prevPlayArea = game.playArea.length;
+  try {
+    applyAction(game, engineAction);
+  } catch (err) {
+    console.error(err);
+    playSfx(HOSPITAL, "error");
+    return;
+  }
+
+  feedbackFor(engineAction, wasPhase, prevPlayArea);
+  revealedGateKey = null;
+  persistAndRender();
+}
+
+function feedbackFor(action, wasPhase, prevPlayArea) {
+  const lastLog = game.actionLog[game.actionLog.length - 1];
+  if (lastLog && lastLog.type === "bust") {
+    playSfx(HOSPITAL, "error");
+    showToast("😱 진료실 대소동!");
+  } else if (action.type === "bank") {
+    playSfx(HOSPITAL, "confirm");
+    showToast("✅ 진료를 마쳤어요");
+  } else if (game.phase === "game_over") {
+    playSfx(HOSPITAL, "win");
+  } else {
+    playSfx(HOSPITAL, "tap");
+  }
+}
+
+function showToast(msg) {
+  const el = document.getElementById("mla-toast");
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add("mla-show");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove("mla-show"), 1600);
+}
+
+function persistAndRender() {
+  if (game && game.phase !== "game_over") saveGame(game);
+  render();
+}

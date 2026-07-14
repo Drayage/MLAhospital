@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>사운드 미리듣기</title>
+  <style>
+    body { font-family: sans-serif; margin: 16px; background: #1a1d24; color: #eee; }
+    section { margin-bottom: 20px; padding: 12px; background: #242833; border-radius: 12px; }
+    h2 { margin: 0 0 8px; font-size: 16px; }
+    button { margin: 3px; padding: 8px 14px; border: 0; border-radius: 8px; background: #3a4256; color: #fff; font-size: 14px; }
+    button:active { background: #5a6480; }
+    label { display: block; margin-top: 10px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1 style="font-size:18px">🔊 사운드 팔레트 미리듣기</h1>
+  <p style="font-size:13px;opacity:.7">게임을 플레이하지 않고 사운드만 반복 청취·비교하는 페이지.
+  팔레트 튜닝 요청은 여기서 들어보고 "탭 소리를 더 둔탁하게" 식으로 하면 빠르다.</p>
+  <div id="root"></div>
+  <label>SFX 볼륨 <input id="sfxVol" type="range" min="0" max="1" step="0.05" /></label>
+  <label>BGM 볼륨 <input id="bgmVol" type="range" min="0" max="1" step="0.05" /></label>
+
+  <script type="module">
+    import { initAudio, playSfx, startBgm, stopBgm, setVolume, getVolumes } from "./js/audio.js";
+    import { ALL_PALETTES } from "./js/palettes.js";
+
+    initAudio();
+    const root = document.getElementById("root");
+    for (const [key, pal] of Object.entries(ALL_PALETTES)) {
+      const sec = document.createElement("section");
+      sec.innerHTML = `<h2>${pal.name}</h2>`;
+      for (const sfxName of Object.keys(pal.sfx)) {
+        const b = document.createElement("button");
+        b.textContent = "SFX: " + sfxName;
+        b.onclick = () => playSfx(pal, sfxName);
+        sec.appendChild(b);
+      }
+      const play = document.createElement("button");
+      play.textContent = "▶ BGM";
+      play.onclick = () => startBgm(pal);
+      sec.appendChild(play);
+      root.appendChild(sec);
+    }
+    const stop = document.createElement("button");
+    stop.textContent = "⏹ BGM 정지";
+    stop.onclick = () => stopBgm();
+    root.appendChild(stop);
+
+    const vols = getVolumes();
+    sfxVol.value = vols.sfx; bgmVol.value = vols.bgm;
+    sfxVol.oninput = () => setVolume("sfx", +sfxVol.value);
+    bgmVol.oninput = () => setVolume("bgm", +bgmVol.value);
+  </script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <!-- 모바일: 100vh 대신 dvh/innerHeight 기반 (주소창이 버튼을 밀어내는 버그 예방) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>우리집 동물병원</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="apple-touch-icon" href="./icon-180.png" />
+  <script>
+    // PWA 설치 프롬프트는 모듈 로드 전에 발생할 수 있으므로 head 인라인에서 선캡처 (uritichu 교훈)
+    window.deferredInstallPrompt = null;
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      window.deferredInstallPrompt = e;
+    });
+  </script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; }
+    :root {
+      --bg: #fff3e6;
+      --panel: #ffffff;
+      --panel-soft: #fff8f0;
+      --ink: #4a3a2f;
+      --ink-soft: #8a7266;
+      --accent: #ffb37a;
+      --accent-strong: #ff8c4b;
+      --accent-ink: #5c3a1e;
+      --good: #8fc99a;
+      --bad: #ef8e8e;
+      --border: #f0d8c0;
+      --shadow: 0 3px 10px rgba(120, 80, 40, 0.12);
+    }
+    body {
+      font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      background: var(--bg); color: var(--ink);
+      height: 100dvh;
+      display: flex; flex-direction: column;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right)
+               env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    /* 액션 버튼은 스크롤 영역 밖에 고정, 가변 콘텐츠만 내부 스크롤 */
+    #game-area { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 10px 12px 4px; }
+    #action-bar {
+      flex: 0 0 auto; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+      display: flex; gap: 8px; justify-content: center; background: var(--panel-soft);
+      border-top: 1px solid var(--border);
+    }
+    #action-bar button { padding: 12px 18px; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-size: 15px; font-weight: 700; flex: 1; max-width: 220px; }
+    #action-bar button:disabled { background: #f2e4d4; color: #c2ac98; }
+    #action-bar button.mla-bank-btn { background: var(--good); color: #1f3d26; }
+    #action-bar button.mla-bank-btn:disabled { background: #f2e4d4; color: #c2ac98; }
+    #action-bar button.mla-rules-btn { background: transparent; color: var(--ink-soft); flex: 0 0 auto; max-width: none; font-weight: 400; text-decoration: underline; }
+    dialog { border: 0; border-radius: 16px; max-width: 460px; width: 90vw; padding: 18px; color: var(--ink); background: var(--panel); box-shadow: var(--shadow); }
+    dialog::backdrop { background: rgba(74, 58, 47, 0.45); }
+    button { font-family: inherit; cursor: pointer; }
+    h1, h2, h3 { margin: 0 0 8px; }
+
+    .mla-suit-card {
+      display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+      width: 56px; height: 76px; border-radius: 10px; background: var(--panel);
+      border: 2px solid var(--border); box-shadow: var(--shadow); margin: 3px; position: relative;
+      font-size: 12px; color: var(--ink);
+    }
+    .mla-suit-card .mla-icon { font-size: 22px; }
+    .mla-suit-card .mla-value { font-weight: 800; font-size: 15px; }
+    .mla-suit-card.mla-protected { border-color: var(--good); box-shadow: 0 0 0 2px var(--good) inset; }
+    .mla-suit-card.mla-ghost { opacity: 0.35; border-style: dashed; }
+    .mla-suit-card .mla-badge {
+      position: absolute; top: -6px; right: -6px; background: var(--accent-strong); color: #fff;
+      border-radius: 999px; font-size: 10px; padding: 1px 5px; font-weight: 700;
+    }
+    .mla-row { display: flex; flex-wrap: wrap; align-items: flex-start; }
+    .mla-panel { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; }
+    .mla-panel h3 { font-size: 13px; color: var(--ink-soft); letter-spacing: 0.02em; }
+    .mla-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 700; margin-right: 6px; }
+    .mla-pill.mla-pill-soft { background: #ffe3cc; color: var(--accent-ink); }
+    .mla-pill.mla-pill-warn { background: var(--bad); color: #4a1414; }
+    .mla-player-card { border: 2px solid var(--border); border-radius: 14px; padding: 8px 10px; margin-bottom: 8px; background: var(--panel); }
+    .mla-player-card.mla-current { border-color: var(--accent-strong); box-shadow: 0 0 0 3px #ffd9b8; }
+    .mla-player-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 4px; }
+    .mla-choice-btn {
+      display: block; width: 100%; text-align: left; padding: 10px 12px; margin: 6px 0; border-radius: 10px;
+      border: 2px solid var(--border); background: var(--panel); color: var(--ink); font-size: 14px;
+    }
+    .mla-choice-btn:active { background: var(--accent); }
+    .mla-center { text-align: center; }
+    .mla-muted { color: var(--ink-soft); font-size: 13px; }
+    .mla-toast {
+      position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 5000;
+      background: var(--accent-ink); color: #fff; padding: 10px 16px; border-radius: 999px; font-size: 13px;
+      box-shadow: var(--shadow); opacity: 0; transition: opacity .25s, top .25s; pointer-events: none;
+    }
+    .mla-toast.mla-show { opacity: 1; top: 22px; }
+    .mla-setup-field { margin-bottom: 14px; }
+    .mla-setup-field label { display: block; font-size: 13px; color: var(--ink-soft); margin-bottom: 4px; }
+    .mla-setup-field input, .mla-setup-field select {
+      width: 100%; padding: 10px; border-radius: 10px; border: 2px solid var(--border); font-size: 15px; background: #fff;
+    }
+    .mla-trait-card { border: 2px solid var(--border); border-radius: 14px; padding: 12px; margin-bottom: 8px; background: var(--panel); }
+    .mla-trait-card h4 { margin: 0 0 4px; }
+    .mla-hidden-veil {
+      background: var(--panel-soft); border: 2px dashed var(--border); border-radius: 14px; padding: 22px; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-area">
+    <p class="mla-center mla-muted" style="padding-top:40px">불러오는 중...</p>
+  </div>
+  <div id="action-bar">
+    <button id="rules-btn" class="mla-rules-btn" type="button">게임 방법</button>
+  </div>
+
+  <dialog id="rules-modal">
+    <h2>우리집 동물병원 — 게임 방법</h2>
+    <p>가족 단위 환자를 접수하는 푸시 유어 럭 카드 게임이에요.</p>
+    <ol style="padding-left:18px; font-size:14px; line-height:1.6;">
+      <li>내 차례에 대기실 덱에서 환자 카드를 한 장씩 공개해요.</li>
+      <li>이번 진료 줄에 <b>같은 종류</b>의 동물이 다시 나오면 <b>진료실 대소동!</b> — 이번에 접수한 카드를 모두 잃어요.</li>
+      <li>대소동이 나기 전에 <b>진료 마치기</b>를 선택하면 이번 진료 줄의 카드를 모두 확보해요.</li>
+      <li>동물마다 특별한 능력이 있어요 (거북이는 보호, 원숭이는 재투입, 토끼는 추가 접수 강제 등).</li>
+      <li>대기실 덱이 다 떨어지면 게임이 끝나고, 동물 종류별로 가장 큰 숫자만 합산해 점수를 매겨요.</li>
+    </ol>
+    <button onclick="this.closest('dialog').close()">닫기</button>
+  </dialog>
+
+  <div id="mla-toast" class="mla-toast"></div>
+
+  <script type="module">
+    import { APP_VERSION } from "./js/app-config.js";
+    import { mountVersionBadge, mountErrorOverlay } from "./js/devtools.js";
+    import { initAudio } from "./js/audio.js";
+    import { startApp } from "./js/ui.js";
+
+    mountErrorOverlay(); // 가장 먼저 — 초기화 에러도 잡히게
+    mountVersionBadge();
+    initAudio();
+
+    document.getElementById("rules-btn").onclick = () =>
+      document.getElementById("rules-modal").showModal();
+
+    startApp();
+
+    // dvh 미지원 브라우저 폴백 + 뷰포트 변화 시 재측정 (uritichu 교훈)
+    const setVh = () =>
+      document.body.style.height = window.innerHeight + "px";
+    if (!CSS.supports("height", "100dvh")) {
+      setVh();
+      window.addEventListener("resize", setVh);
+    }
+
+    // SW 등록 + 새 버전 활성화 시 1회 자동 reload (캐시 고착 방지 확정 패턴)
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js?v=" + APP_VERSION);
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (sessionStorage.getItem("sw-reloaded")) return;
+        sessionStorage.setItem("sw-reloaded", "1");
+        location.reload();
+      });
+      window.addEventListener("load", () =>
+        setTimeout(() => sessionStorage.removeItem("sw-reloaded"), 3000)
+      );
+    }
+  </script>
+</body>
+</html>
