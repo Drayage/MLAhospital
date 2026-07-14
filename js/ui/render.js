@@ -408,7 +408,7 @@ export function gameBoardHtml(state, { bustInfo = null, aiThinking = false, alre
   `;
 }
 
-export function gameOverHtml(state) {
+export function gameOverHtml(state, { surrendered = false } = {}) {
   const ranked = state.players.slice().sort((a, b) => b.score - a.score);
   const winners = new Set(state.winnerIds);
   const rows = ranked
@@ -425,8 +425,11 @@ export function gameOverHtml(state) {
     })
     .join("");
   const winnerNames = ranked.filter((p) => winners.has(p.playerId)).map((p) => p.displayName).join(", ");
+  const heading = surrendered
+    ? `<h2>🏳️ 항복으로 진료를 마쳤어요</h2><p class="mla-muted" style="margin:0 0 6px">그 시점까지의 점수로 결과를 매겼어요.</p>`
+    : `<h2>🎉 오늘의 진료 종료!</h2>`;
   return `<div class="mla-panel mla-center">
-      <h2>🎉 오늘의 진료 종료!</h2>
+      ${heading}
       <p>${state.winnerIds.length > 1 ? "공동 우승" : "우승"}: <b>${esc(winnerNames)}</b></p>
     </div>
     ${rows}

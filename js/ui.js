@@ -1,6 +1,7 @@
 // 컨트롤러 — 게임 엔진과 화면을 잇는다. 규칙 로직은 절대 여기 두지 않는다.
 import { createGame } from "./engine/state.js";
 import { getLegalActions, applyAction } from "./engine/actions.js";
+import { finishGame } from "./engine/scoring.js";
 import { saveGame, loadGame, clearGame } from "./storage.js";
 import { playSfx, startBgm } from "./audio.js";
 import { HOSPITAL } from "./palettes.js";
@@ -23,6 +24,7 @@ let pendingBust = null; // 대소동이 나면 진료 줄 자리에서 어떤 �
 let aiTimer = null;
 let bustTimer = null;
 let lastFlippedCardId = null; // 이미 뒤집기 연출을 보여준 카드 — 재렌더 때 또 뒤집지 않으려고 기록
+let surrendered = false; // 항복으로 게임이 끝났는지 (게임오버 화면 문구 구분용)
 
 const AI_THINK_DELAY_MS = 1300; // 사람처럼 살짝 고민하는 느낌
 const BUST_AUTO_DISMISS_MS = 2600;
@@ -102,7 +104,7 @@ function render() {
   } else if (game.phase === "variant_selection") {
     gameArea().innerHTML = variantSelectionHtml(game);
   } else if (game.phase === "game_over") {
-    gameArea().innerHTML = gameOverHtml(game);
+    gameArea().innerHTML = gameOverHtml(game, { surrendered });
     clearGame();
   } else {
     gameArea().innerHTML = gameBoardHtml(game, {
@@ -122,6 +124,14 @@ function renderActionBar() {
   if (!game || pendingBust) return;
   if (game.phase === "game_over" || game.phase === "trait_selection" || game.phase === "variant_selection") return;
 
+  // 항복은 누구 차례든(심지어 AI가 고민 중일 때도) 바로 게임을 끝낼 수 있어야 하므로,
+  // 두 경로(AI 고민 중 / 사람 차례) 모두 rules-btn 바로 앞에 넣어준다.
+  const surrenderBtn = document.createElement("button");
+  surrenderBtn.textContent = "🏳️ 항복";
+  surrenderBtn.className = "mla-rules-btn";
+  surrenderBtn.setAttribute("data-mla-main", "1");
+  surrenderBtn.setAttribute("data-action", "surrender");
+
   const actor = currentActor();
   if (actor && actor.isAI) {
     const thinking = document.createElement("span");
@@ -129,6 +139,7 @@ function renderActionBar() {
     thinking.setAttribute("data-mla-main", "1");
     thinking.textContent = `🤖 ${actor.displayName}님이 고민 중...`;
     bar.insertBefore(thinking, rulesBtn);
+    bar.insertBefore(surrenderBtn, rulesBtn);
     return;
   }
 
@@ -151,6 +162,7 @@ function renderActionBar() {
 
   bar.insertBefore(drawBtn, rulesBtn);
   bar.insertBefore(bankBtn, rulesBtn);
+  bar.insertBefore(surrenderBtn, rulesBtn);
 }
 
 function regenNameFields() {
@@ -180,6 +192,7 @@ function onSubmit(e) {
     variantMode: data.get("variantMode") || "none",
   });
   pendingBust = null;
+  surrendered = false;
   persistAndRender();
 }
 
@@ -212,6 +225,15 @@ function handleActionClick(btn) {
     pendingBust = null;
     clearGame();
     render();
+    return;
+  }
+  if (action === "surrender") {
+    document.getElementById("surrender-modal").showModal();
+    return;
+  }
+  if (action === "confirm-surrender") {
+    document.getElementById("surrender-modal").close();
+    doSurrender();
     return;
   }
   if (btn.closest("#mla-setup-form")) return; // submit이 처리
@@ -247,6 +269,20 @@ function commitAction(engineAction) {
   const bankEntry = newEntries.find((entry) => entry.type === "bank");
   feedbackFor(engineAction, bustEntry, bankEntry);
   if (bustEntry) pendingBust = bustEntry;
+  persistAndRender();
+}
+
+// 항복: 진행 중이던 진료 줄(아직 확보 안 한 카드)은 그대로 날리고, 지금까지 입원시킨
+// 카드만으로 즉시 점수를 매겨 게임을 끝낸다 — 대기실 덱이 자연히 떨어졌을 때와 같은
+// finishGame 경로를 그대로 재사용한다.
+function doSurrender() {
+  if (!game || game.phase === "game_over") return;
+  clearTimeout(aiTimer);
+  clearTimeout(bustTimer);
+  pendingBust = null;
+  surrendered = true;
+  finishGame(game);
+  playSfx(HOSPITAL, "win");
   persistAndRender();
 }
 

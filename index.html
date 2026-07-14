@@ -209,6 +209,15 @@
     <button onclick="this.closest('dialog').close()">닫기</button>
   </dialog>
 
+  <dialog id="surrender-modal">
+    <h2>🏳️ 항복하시겠어요?</h2>
+    <p class="mla-muted">진행 중인 진료 줄의 카드는 확보되지 않고, 지금까지 입원시킨 카드만으로 점수를 매겨 게임이 바로 끝나요.</p>
+    <div class="mla-row" style="gap:8px; margin-top:10px; flex-wrap:nowrap;">
+      <button type="button" style="flex:1; padding:10px; border-radius:10px; border:2px solid var(--border); background:var(--panel); color:var(--ink); font-weight:700;" onclick="this.closest('dialog').close()">계속 진료하기</button>
+      <button type="button" data-action="confirm-surrender" style="flex:1; padding:10px; border-radius:10px; border:0; background:var(--bad); color:#4a1414; font-weight:700;">항복하기</button>
+    </div>
+  </dialog>
+
   <div id="mla-toast" class="mla-toast"></div>
 
   <script type="module">
