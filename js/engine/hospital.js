@@ -1,6 +1,5 @@
 // 입원실(hospitalStacks) 조작 헬퍼 — 명세 5.1/6.4.2/11장.
 import { getCard } from "../data/cards.js";
-import { traitEffect } from "../data/traits.js";
 import { logAction } from "./state.js";
 
 // 스택 안에서 가장 숫자가 높은 카드 ID (없으면 null). "맨 위"의 정의.
@@ -13,6 +12,22 @@ export function getTopCardId(stack) {
   return best;
 }
 
+// 스택 안에서 가장 숫자가 낮은 카드 ID — "작은 가족부터" 변형 규칙(Bottom Feeder)용.
+export function getBottomCardId(stack) {
+  if (!stack || stack.length === 0) return null;
+  let worst = stack[0];
+  for (const cid of stack) {
+    if (getCard(cid).value < getCard(worst).value) worst = cid;
+  }
+  return worst;
+}
+
+// 고양이/강아지가 상대 카드를 대상으로 할 때, 활성 변형 규칙에 따라 맨 위(기본) 또는
+// 맨 아래(작은 가족부터) 카드를 고른다.
+export function getTargetCardId(stack, variant) {
+  return variant && variant.smallestFamilyFirst ? getBottomCardId(stack) : getTopCardId(stack);
+}
+
 export function removeFromHospital(player, cardId) {
   const suit = getCard(cardId).suit;
   const stack = player.hospitalStacks[suit];
@@ -22,12 +37,9 @@ export function removeFromHospital(player, cardId) {
 }
 
 // 카드를 플레이어 입원실에 최종적으로 넣는다 (뱅킹/보호 성공 시 호출).
-// onSuitGained 특기 훅(공작 귀한 표본 등)을 여기서 일괄 발동시킨다.
 export function gainCardToHospital(state, player, cardId) {
   const card = getCard(cardId);
   player.hospitalStacks[card.suit].push(cardId);
-  const hook = traitEffect(player, "onSuitGained");
-  if (hook) hook(state, { card, cardId, player });
   logAction(state, { type: "gain_card", playerId: player.playerId, cardId });
 }
 

@@ -11,6 +11,7 @@ import {
   setupScreenHtml,
   nameFieldsHtml,
   traitSelectionHtml,
+  harborTargetSelectionHtml,
   aiTraitWaitingHtml,
   variantSelectionHtml,
   gameBoardHtml,
@@ -90,7 +91,14 @@ function render() {
 
   const actor = currentActor();
   if (game.phase === "trait_selection") {
-    gameArea().innerHTML = actor && actor.isAI ? aiTraitWaitingHtml(actor) : traitSelectionHtml(game);
+    const decisionType = game.pendingDecision.type;
+    if (actor && actor.isAI) {
+      gameArea().innerHTML = aiTraitWaitingHtml(actor, decisionType);
+    } else if (decisionType === "harbor_watch_target") {
+      gameArea().innerHTML = harborTargetSelectionHtml(game);
+    } else {
+      gameArea().innerHTML = traitSelectionHtml(game);
+    }
   } else if (game.phase === "variant_selection") {
     gameArea().innerHTML = variantSelectionHtml(game);
   } else if (game.phase === "game_over") {
@@ -214,6 +222,7 @@ function handleActionClick(btn) {
   if (action === "draw") engineAction = { type: "DRAW" };
   else if (action === "bank") engineAction = { type: "BANK" };
   else if (action === "select-trait") engineAction = { type: "SELECT_TRAIT", traitId: btn.getAttribute("data-trait-id") };
+  else if (action === "select-harbor-target") engineAction = { type: "SELECT_HARBOR_TARGET", targetPlayerId: btn.getAttribute("data-target-player-id") };
   else if (action === "select-variant") engineAction = { type: "SELECT_VARIANT", variantId: btn.getAttribute("data-variant-id") };
   else if (action === "confirm-variant") engineAction = { type: "CONFIRM_VARIANT" };
   else if (action === "decide") engineAction = { type: "DECIDE", value: JSON.parse(btn.getAttribute("data-value")) };

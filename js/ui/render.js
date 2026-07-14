@@ -173,8 +173,10 @@ export function traitSelectionHtml(state) {
   const cards = d.options
     .map((traitId) => {
       const t = TRAITS[traitId];
+      // 옆 병원 당직자처럼 특정 종류가 아니라 전체에 걸리는 특기는 affectedSuit가 없다.
+      const suitLabel = t.affectedSuit ? ` <span class="mla-muted">(${esc(ANIMALS[t.affectedSuit].name)})</span>` : "";
       return `<div class="mla-trait-card">
-        <h4>${esc(t.name)} <span class="mla-muted">(${esc(ANIMALS[t.affectedSuit].name)})</span></h4>
+        <h4>${esc(t.name)}${suitLabel}</h4>
         <p class="mla-muted" style="margin:0 0 8px">${esc(t.description)}</p>
         <button class="mla-choice-btn" data-action="select-trait" data-trait-id="${t.id}">이 특기를 선택</button>
       </div>`;
@@ -187,10 +189,29 @@ export function traitSelectionHtml(state) {
     ${cards}`;
 }
 
-// AI 차례에는 사람이 대신 고를 수 있는 버튼을 보여주지 않고, 고르는 중이라고만 알려준다.
-export function aiTraitWaitingHtml(player) {
+// 옆 병원 당직자(Davy Jones' Locker) 특기를 고른 사람이, 대소동 카드를 대신 받아갈
+// 플레이어 한 명을 지정하는 화면. 특기 선택 화면 바로 뒤에 이어진다.
+export function harborTargetSelectionHtml(state) {
+  const d = state.pendingDecision;
+  const player = state.players.find((p) => p.playerId === d.playerId);
+  const options = d.options
+    .map((pid) => {
+      const target = state.players.find((p) => p.playerId === pid);
+      return `<button class="mla-choice-btn" data-action="select-harbor-target" data-target-player-id="${pid}">${esc(target.displayName)}</button>`;
+    })
+    .join("");
   return `<div class="mla-panel mla-center">
-    <p style="font-size:15px">🤖 <b>${esc(player.displayName)}</b>님이 특기를 고르고 있어요...</p>
+      <h2>🏥 ${esc(player.displayName)}님의 옆 병원 지정</h2>
+      <p class="mla-muted">누군가 대소동을 일으키면, 버려질 카드를 대신 내가 받아올 플레이어를 골라주세요.</p>
+      ${options}
+    </div>`;
+}
+
+// AI 차례에는 사람이 대신 고를 수 있는 버튼을 보여주지 않고, 고르는 중이라고만 알려준다.
+export function aiTraitWaitingHtml(player, decisionType) {
+  const label = decisionType === "harbor_watch_target" ? "옆 병원을 지정하고" : "특기를 고르고";
+  return `<div class="mla-panel mla-center">
+    <p style="font-size:15px">🤖 <b>${esc(player.displayName)}</b>님이 ${label} 있어요...</p>
   </div>`;
 }
 
@@ -257,24 +278,52 @@ function inlineRevealRow(state) {
     </div>`;
   }
   if (d.type === "owl_choose") {
+    // 영상 판독 특기(Mystic): 3장을 미리 보여주지만, 순서를 어길 수 없어 맨 앞 카드만 탭할 수 있다.
     const cards = d.previewCardIds
-      .map((cid) => cardHtml(cid, { flip: true, tension, decideValue: { action: "take", cardId: cid } }))
+      .map((cid, i) => {
+        const selectable = !d.mysticMode || i === 0;
+        return cardHtml(cid, { flip: true, tension, decideValue: selectable ? { action: "take", cardId: cid } : undefined });
+      })
       .join("");
     const bankLine = d.canBank
       ? `<button class="mla-inline-link" data-action="decide" data-value='${esc(JSON.stringify({ action: "bank" }))}'>또는, 지금 바로 진료 마치기</button>`
       : `<p class="mla-muted">토끼 강제 접수 중에는 지금 진료를 마칠 수 없어요.</p>`;
+    const mysticNote = d.mysticMode
+      ? `<p class="mla-muted">🔮 영상 판독 특기 — 순서대로만 접수할 수 있어요. 맨 왼쪽 카드만 선택할 수 있습니다.</p>`
+      : "";
     return `<div class="mla-reveal-row">
       <p class="mla-decision-banner">🦉 부엉이 능력 — 다음 카드를 몰래 확인했어요. 접수하려면 카드를 탭하세요.</p>
       <div class="mla-row">${cards}</div>
+      ${mysticNote}
       ${bankLine}
     </div>`;
   }
   return "";
 }
 
+// 간식 가로채기 특기(Plunderer)가 있으면, 볼빵빵 보너스를 귀가 더미 대신 다른 플레이어의
+// 병원에서 가져온다. 습격할 상대를 고르는 화면 — 진료 줄이 비어 있는 채로(방금 진료를
+// 마쳤으므로) 그 자리를 대신 채운다.
+function plunderTargetHtml(state) {
+  const d = state.pendingDecision;
+  const buttons = d.options
+    .map((pid) => {
+      const target = state.players.find((p) => p.playerId === pid);
+      return `<button class="mla-choice-btn" data-action="decide" data-value='${esc(JSON.stringify(pid))}'>${esc(target.displayName)}의 병원 습격하기</button>`;
+    })
+    .join("");
+  return `<p class="mla-decision-banner">🦝 간식 가로채기 특기 — 볼빵빵 보너스를 상대 병원에서 가져와요. 습격할 상대를 골라주세요.</p>${buttons}`;
+}
+
 function playAreaHtml(state, aiThinking, alreadyFlippedCardId) {
   if (state.playArea.length === 0) {
-    return `<div class="mla-panel"><h3>현재 진료 줄</h3><p class="mla-muted">아직 접수한 환자가 없어요.</p></div>`;
+    // 간식 가로채기 특기의 습격 대상 선택은 진료 줄이 빈 채로(방금 진료를 마쳤으므로) 일어난다.
+    const plundering = state.pendingDecision && state.pendingDecision.type === "plunder_choose_target";
+    if (plundering && !aiThinking) {
+      return `<div class="mla-panel"><h3>현재 진료 줄</h3>${plunderTargetHtml(state)}</div>`;
+    }
+    const aiPlunderNote = plundering && aiThinking ? `<p class="mla-muted">🤖 습격할 병원을 고르고 있어요...</p>` : "";
+    return `<div class="mla-panel"><h3>현재 진료 줄</h3><p class="mla-muted">아직 접수한 환자가 없어요.</p>${aiPlunderNote}</div>`;
   }
   const protectedSet = new Set(state.protectedCardIds);
   const lastIdx = state.playArea.length - 1;

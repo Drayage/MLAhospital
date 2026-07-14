@@ -56,6 +56,11 @@ function chooseDecisionAction(state, legal) {
       return bestTarget(state, legal);
     case "owl_choose":
       return chooseOwl(state, legal);
+    case "plunder_choose_target":
+      return bestByValue(legal, (a) => {
+        const target = state.players.find((p) => p.playerId === a.value);
+        return Object.values(target.hospitalStacks).reduce((sum, stack) => sum + stack.length, 0);
+      });
     default:
       return legal[Math.floor(nextRandom(state) * legal.length)];
   }

@@ -1,10 +1,21 @@
 // 환자 카드 능력 — 명세 9장. 각 능력은 begin(선택지 계산/자동실행/결정대기)과
 // resolve(결정 확정 후 실제 처리)로 나뉜다. 옵션이 1개 이하면 즉시 자동 실행한다.
 import { getCard } from "../data/cards.js";
-import { traitEffect } from "../data/traits.js";
+import { traitEffect, findPlayerWithTrait } from "../data/traits.js";
+import { getVariant } from "../data/variants.js";
 import { currentPlayer, getPlayer, logAction } from "./state.js";
-import { getTopCardId, removeFromHospital, hospitalSuitsWithCards } from "./hospital.js";
+import {
+  getTopCardId,
+  getTargetCardId,
+  removeFromHospital,
+  hospitalSuitsWithCards,
+  gainCardToHospital,
+} from "./hospital.js";
 import { nextRandom } from "./rng.js";
+
+function activeVariant(state) {
+  return getVariant(state.activeVariantId);
+}
 
 export function resolveSuitAbility(state, cardId) {
   const card = getCard(cardId);
@@ -19,15 +30,15 @@ export function resolveSuitAbility(state, cardId) {
     case "mole":
       return state.effectQueue.push({ type: "MOLE_PICK", playerId: player.playerId });
     case "owl":
-      return state.effectQueue.push({ type: "OWL_PEEK", playerId: player.playerId, peekCount: owlPeekCount(player) });
+      return state.effectQueue.push({ type: "OWL_PEEK", playerId: player.playerId });
     case "cat":
       return state.effectQueue.push({ type: "CAT_PICK", playerId: player.playerId });
     case "hamster":
     case "almond":
     case "peacock":
-      return; // 능력 없음 (조합/뱅킹 시점 또는 무능력)
+      return; // 능력 없음 (조합/뱅킹 시점 또는 무능력. 공작 애호가는 onCardEntered에서 처리)
     case "rabbit":
-      return abilityRabbit(state, player);
+      return abilityRabbit(state, cardId, player);
     default:
       throw new Error("알 수 없는 카드 종류: " + card.suit);
   }
@@ -39,10 +50,6 @@ function abilityTurtle(state, cardId, player) {
   const before = state.playArea.slice(0, idx);
   for (const cid of before) {
     if (!state.protectedCardIds.includes(cid)) state.protectedCardIds.push(cid);
-  }
-  const protectSelf = traitEffect(player, "protectSelf");
-  if (protectSelf && protectSelf(state, { cardId, player }) && !state.protectedCardIds.includes(cardId)) {
-    state.protectedCardIds.push(cardId);
   }
   logAction(state, { type: "ability_turtle", playerId: player.playerId, protected: before });
 }
@@ -86,15 +93,14 @@ function applyMonkeyPick(state, player, cardId, remaining) {
 }
 
 // ── 강아지: 상대 카드 제거 ──────────────────────────────────────
-function dogRemoveCount(player) {
-  const override = traitEffect(player, "dogRemoveCount");
-  return override ? override() : 1;
-}
 function dogDestination(player) {
   const override = traitEffect(player, "dogDestination");
   return override ? override() : "discard";
 }
 
+// 강아지 공포증(Misfire) 보유자는 강아지 능력의 대상이 될 수 없다 — 그를 선택하면
+// 대신 공격한 쪽이 자기 병원에서 카드 한 장을 잃는다. 그래서 정상 대상 목록에는
+// 남겨두되(선택은 가능), 실제 처리에서 반사시킨다.
 export function dogOptions(state, player) {
   const opponents = state.players.filter((p) => p.playerId !== player.playerId);
   const options = [];
@@ -126,34 +132,46 @@ export function resolveDogDecision(state, choice) {
 
 function applyDogPick(state, player, { opponentId, suit }) {
   const opponent = getPlayer(state, opponentId);
-  const count = dogRemoveCount(player);
-  const destination = dogDestination(player);
-  const removed = [];
-  for (let i = 0; i < count; i++) {
-    const stack = opponent.hospitalStacks[suit];
-    const topId = getTopCardId(stack);
-    if (!topId) break;
-    removeFromHospital(opponent, topId);
-    removed.push(topId);
-    if (destination === "owner_hospital") {
-      player.hospitalStacks[getCard(topId).suit].push(topId);
-    } else {
+
+  // 강아지 공포증: 반사 — 공격자 자신의 입원실에서 무작위 카드 한 장을 대신 잃는다.
+  if (opponent.traitId === "misfire") {
+    const mySuits = hospitalSuitsWithCards(player);
+    if (mySuits.length > 0) {
+      const pickSuit = mySuits[Math.floor(nextRandom(state) * mySuits.length)];
+      const topId = getTopCardId(player.hospitalStacks[pickSuit]);
+      removeFromHospital(player, topId);
       state.discardPile.push(topId);
+      logAction(state, { type: "misfire_reflect", playerId: player.playerId, opponentId, cardId: topId });
+    }
+    return;
+  }
+
+  const destination = dogDestination(player);
+  const entireStack = !!traitEffect(player, "dogRemoveEntireStack");
+  const variant = activeVariant(state);
+  const stack = opponent.hospitalStacks[suit];
+  const removed = [];
+  const count = entireStack ? stack.length : 1;
+  for (let i = 0; i < count; i++) {
+    const targetId = getTargetCardId(stack, variant);
+    if (!targetId) break;
+    removeFromHospital(opponent, targetId);
+    removed.push(targetId);
+    if (destination === "owner_hospital") {
+      player.hospitalStacks[getCard(targetId).suit].push(targetId);
+    } else {
+      state.discardPile.push(targetId);
     }
   }
   logAction(state, { type: "dog_remove", playerId: player.playerId, opponentId, suit, removed, destination });
 }
 
 // ── 두더지: 귀가 더미 탐색 ──────────────────────────────────────
-function moleRevealCount(player) {
-  const override = traitEffect(player, "moleRevealCount");
-  return override ? override() : 3;
-}
-
 export function beginMolePick(state, task) {
   const player = getPlayer(state, task.playerId);
   if (state.discardPile.length === 0) return;
-  const n = Math.min(moleRevealCount(player), state.discardPile.length);
+  const revealAll = !!traitEffect(player, "moleRevealAll");
+  const n = revealAll ? state.discardPile.length : Math.min(3, state.discardPile.length);
   const revealed = [];
   for (let i = 0; i < n; i++) {
     const idx = Math.floor(nextRandom(state) * state.discardPile.length);
@@ -175,38 +193,29 @@ export function resolveMoleDecision(state, cardId) {
 }
 
 function applyMolePick(state, player, cardId, unchosenCardIds) {
-  const keeperHook = traitEffect(player, "moleKeeperBonus");
-  let keeperTaken = [];
-  if (keeperHook && unchosenCardIds.length > 0) {
-    const bonusCount = Math.min(keeperHook(state, { unchosenCardIds }), unchosenCardIds.length);
-    keeperTaken = unchosenCardIds.slice(0, bonusCount);
-    for (const cid of keeperTaken) {
-      player.hospitalStacks[getCard(cid).suit].push(cid);
-    }
-  }
-  const returned = unchosenCardIds.filter((cid) => !keeperTaken.includes(cid));
-  state.discardPile.push(...returned);
-  logAction(state, { type: "mole_pick", playerId: player.playerId, cardId, returned, keeperTaken });
+  state.discardPile.push(...unchosenCardIds);
+  logAction(state, { type: "mole_pick", playerId: player.playerId, cardId, returned: unchosenCardIds });
   state.effectQueue.push({ type: "ENTER_CARD", cardId });
 }
 
 // ── 부엉이: 다음 카드 확인 ───────────────────────────────────────
-function owlPeekCount(player) {
-  const override = traitEffect(player, "owlPeekCount");
-  return override ? override() : 1;
-}
-
 export function beginOwlPeek(state, task) {
   const player = getPlayer(state, task.playerId);
   if (state.drawPile.length === 0) return; // 볼 카드 없음 — 효과 없음
-  const n = Math.min(task.peekCount || 1, state.drawPile.length);
-  const previewCardIds = state.drawPile.slice(state.drawPile.length - n);
+  const mysticMode = !!traitEffect(player, "owlMysticMode");
+  const n = Math.min(mysticMode ? 3 : 1, state.drawPile.length);
+  // drawPile은 배열 끝이 "맨 위"(다음에 뽑힐 카드)이므로, 뽑히는 순서대로 보여주려면
+  // 뒤집어야 한다 (안 그러면 맨 위 카드가 미리보기의 마지막에 와서, 부엉이 영상
+  // 판독가가 "첫 번째 카드"를 접수할 때 실제로는 가장 먼 카드를 접수하게 되는 버그가 생김).
+  const previewCardIds = state.drawPile.slice(state.drawPile.length - n).reverse();
   const canBank = state.requiredExtraDraws === 0;
   state.pendingDecision = {
     type: "owl_choose",
     playerId: player.playerId,
     previewCardIds,
     canBank,
+    // 부엉이 영상 판독가: 순서를 확인만 하고, 접수하려면 반드시 맨 앞(첫 번째) 카드만 가능.
+    mysticMode,
   };
 }
 
@@ -218,6 +227,9 @@ export function resolveOwlDecision(state, choice) {
   if (choice.action === "bank") {
     if (!decision.canBank) throw new Error("추가 접수가 강제된 상태에서는 진료를 마칠 수 없습니다.");
     return { bankNow: true };
+  }
+  if (decision.mysticMode && choice.cardId !== decision.previewCardIds[0]) {
+    throw new Error("부엉이 영상 판독가는 첫 번째 카드만 접수할 수 있습니다.");
   }
   const cardId = choice.cardId;
   // 미리 본 카드 중 선택한 카드만 덱에서 꺼내고 나머지는 원래 순서로 되돌린다.
@@ -264,17 +276,27 @@ export function resolveCatDecision(state, choice) {
 
 function applyCatPick(state, player, { opponentId, suit }) {
   const opponent = getPlayer(state, opponentId);
-  const topId = getTopCardId(opponent.hospitalStacks[suit]);
-  if (!topId) return;
-  removeFromHospital(opponent, topId);
-  logAction(state, { type: "cat_steal", playerId: player.playerId, opponentId, cardId: topId });
-  state.effectQueue.push({ type: "ENTER_CARD", cardId: topId });
+  const variant = activeVariant(state);
+  const targetId = getTargetCardId(opponent.hospitalStacks[suit], variant);
+  if (!targetId) return;
+  removeFromHospital(opponent, targetId);
+  logAction(state, { type: "cat_steal", playerId: player.playerId, opponentId, cardId: targetId });
+  state.effectQueue.push({ type: "ENTER_CARD", cardId: targetId });
 }
 
 // ── 토끼: 추가 접수 강제 ─────────────────────────────────────────
-function abilityRabbit(state, player) {
-  const override = traitEffect(player, "rabbitIncrement");
-  const amount = override ? override() : 2;
+function abilityRabbit(state, cardId, player) {
+  // 토끼 전담 수의사: 즉시 입원, 추가 접수 요구 없음.
+  if (traitEffect(player, "rabbitInstantAdopt")) {
+    const idx = state.playArea.indexOf(cardId);
+    if (idx !== -1) state.playArea.splice(idx, 1);
+    gainCardToHospital(state, player, cardId);
+    logAction(state, { type: "ability_rabbit_instant", playerId: player.playerId, cardId });
+    return;
+  }
+  // 토끼 행동 전문가(Beastmaster): 다른 누군가 갖고 있으면 2장 대신 4장 요구 (내가 보유한 경우 제외).
+  const beastmaster = findPlayerWithTrait(state, "beastmaster", player.playerId);
+  const amount = beastmaster ? 4 : 2;
   state.requiredExtraDraws += amount;
   logAction(state, { type: "ability_rabbit", playerId: player.playerId, amount, requiredExtraDraws: state.requiredExtraDraws });
 }

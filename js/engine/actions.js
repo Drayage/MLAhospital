@@ -3,7 +3,7 @@
 // 현재 허용되는 행동 목록을 계산한다 (엔진과 화면 분리, 명세 23장 설계 원칙).
 import { getPlayer, startGamePlay, logAction } from "./state.js";
 import { doDraw, runQueue } from "./queue.js";
-import { applyBank } from "./bank.js";
+import { applyBank, resolvePlunderDecision } from "./bank.js";
 import {
   resolveMonkeyDecision,
   resolveDogDecision,
@@ -12,11 +12,16 @@ import {
   resolveCatDecision,
 } from "./abilities.js";
 import { VARIANTS } from "../data/variants.js";
+import { getTrait } from "../data/traits.js";
 import { nextRandom } from "./rng.js";
 
 export function getLegalActions(state) {
   if (state.phase === "trait_selection") {
-    return state.pendingDecision.options.map((traitId) => ({ type: "SELECT_TRAIT", traitId }));
+    const d = state.pendingDecision;
+    if (d.type === "harbor_watch_target") {
+      return d.options.map((targetPlayerId) => ({ type: "SELECT_HARBOR_TARGET", targetPlayerId }));
+    }
+    return d.options.map((traitId) => ({ type: "SELECT_TRAIT", traitId }));
   }
   if (state.phase === "variant_selection") {
     if (state.mode.variantMode === "manual") {
@@ -45,8 +50,12 @@ function legalDecisionActions(state) {
     case "dog_choose_target":
     case "cat_choose_target":
       return d.options.map((opt) => ({ type: "DECIDE", value: opt }));
+    case "plunder_choose_target":
+      return d.options.map((targetPlayerId) => ({ type: "DECIDE", value: targetPlayerId }));
     case "owl_choose": {
-      const actions = d.previewCardIds.map((cardId) => ({ type: "DECIDE", value: { action: "take", cardId } }));
+      // 부엉이 영상 판독가(Mystic): 3장을 보여주지만 접수 가능한 건 첫 번째뿐.
+      const takeable = d.mysticMode ? d.previewCardIds.slice(0, 1) : d.previewCardIds;
+      const actions = takeable.map((cardId) => ({ type: "DECIDE", value: { action: "take", cardId } }));
       if (d.canBank) actions.push({ type: "DECIDE", value: { action: "bank" } });
       return actions;
     }
@@ -58,6 +67,7 @@ function legalDecisionActions(state) {
 function actionsEqual(a, b) {
   if (a.type !== b.type) return false;
   if (a.type === "SELECT_TRAIT") return a.traitId === b.traitId;
+  if (a.type === "SELECT_HARBOR_TARGET") return a.targetPlayerId === b.targetPlayerId;
   if (a.type === "SELECT_VARIANT") return a.variantId === b.variantId;
   if (a.type === "DECIDE") return JSON.stringify(a.value) === JSON.stringify(b.value);
   return true; // DRAW / BANK / CONFIRM_VARIANT — 페이로드 없음
@@ -71,6 +81,9 @@ export function applyAction(state, action) {
   switch (action.type) {
     case "SELECT_TRAIT":
       doSelectTrait(state, action.traitId);
+      break;
+    case "SELECT_HARBOR_TARGET":
+      doSelectHarborTarget(state, action.targetPlayerId);
       break;
     case "SELECT_VARIANT":
       doSelectVariant(state, action.variantId);
@@ -99,6 +112,26 @@ function doSelectTrait(state, traitId) {
   player.traitId = traitId;
   logAction(state, { type: "trait_selected", playerId, traitId });
 
+  const trait = getTrait(traitId);
+  if (trait && trait.needsTargetPlayer) {
+    const otherPlayerIds = state.players.filter((p) => p.playerId !== playerId).map((p) => p.playerId);
+    if (otherPlayerIds.length > 0) {
+      state.pendingDecision = { type: "harbor_watch_target", playerId, options: otherPlayerIds };
+      return;
+    }
+  }
+  advanceTraitSelection(state, player);
+}
+
+function doSelectHarborTarget(state, targetPlayerId) {
+  const playerId = state.pendingDecision.playerId;
+  const player = getPlayer(state, playerId);
+  player.harborWatchTargetId = targetPlayerId;
+  logAction(state, { type: "harbor_watch_target_selected", playerId, targetPlayerId });
+  advanceTraitSelection(state, player);
+}
+
+function advanceTraitSelection(state, player) {
   const nextPlayer = state.players.find((p) => p.seatIndex === player.seatIndex + 1);
   if (nextPlayer) {
     state.pendingDecision = {
@@ -145,6 +178,9 @@ function doDecide(state, value) {
       break;
     case "cat_choose_target":
       resolveCatDecision(state, value);
+      break;
+    case "plunder_choose_target":
+      resolvePlunderDecision(state, value);
       break;
     case "owl_choose": {
       const result = resolveOwlDecision(state, value);

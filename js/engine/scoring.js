@@ -2,19 +2,30 @@
 import { SUITS } from "../data/animals.js";
 import { getCard } from "../data/cards.js";
 import { getVariant } from "../data/variants.js";
+import { traitEffect } from "../data/traits.js";
 import { getTopCardId, totalHospitalCardCount } from "./hospital.js";
 
 export function computeScore(state, player) {
   const variant = getVariant(state.activeVariantId);
+  // 공작 품평 전문가(Golden Scales): 점수에 반영되는 공작 카드 한 장당 +5.
+  const peacockBonusHook = traitEffect(player, "peacockScoreBonus");
+  const peacockBonus = peacockBonusHook ? peacockBonusHook() : 0;
+
   let base = 0;
   if (variant && variant.scoreStyle === "sum_all") {
     for (const suit of SUITS) {
-      for (const cid of player.hospitalStacks[suit]) base += getCard(cid).value;
+      for (const cid of player.hospitalStacks[suit]) {
+        base += getCard(cid).value;
+        if (suit === "peacock") base += peacockBonus;
+      }
     }
   } else {
     for (const suit of SUITS) {
       const topId = getTopCardId(player.hospitalStacks[suit]);
-      if (topId) base += getCard(topId).value;
+      if (topId) {
+        base += getCard(topId).value;
+        if (suit === "peacock") base += peacockBonus;
+      }
     }
   }
   let penalty = 0;

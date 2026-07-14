@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createGame, currentPlayer } from "../js/engine/state.js";
-import { applyAction } from "../js/engine/actions.js";
+import { getLegalActions, applyAction } from "../js/engine/actions.js";
 import { endTurnAndAdvance } from "../js/engine/turn.js";
 import { computeScore, finishGame } from "../js/engine/scoring.js";
 import { totalHospitalCardCount } from "../js/engine/hospital.js";
@@ -306,7 +306,7 @@ test("24. 60점 미만 승리 변형이 정상 작동한다", () => {
   assert.deepEqual(state.winnerIds, [p2.playerId]);
 });
 
-test("25. 수의사 특기(원장님의 갈고리손)로 원숭이가 카드 2장을 순서대로 데려온다", () => {
+test("25. 수의사 특기(원숭이 조련사)로 원숭이가 카드 2장을 순서대로 데려온다", () => {
   const state = freshState();
   const player = currentPlayer(state);
   player.traitId = "captains_hook";
@@ -322,4 +322,139 @@ test("25. 수의사 특기(원장님의 갈고리손)로 원숭이가 카드 2�
   assert.ok(state.playArea.includes("cat-4"));
   assert.equal(player.hospitalStacks.dog.length, 0);
   assert.equal(player.hospitalStacks.cat.length, 0);
+});
+
+// ── 원작 특기 17종 재구현 검증 (실제 Dead Man's Draw 특성 카드 매핑) ──────────
+
+test("26. 토끼 행동 전문가: 다른 플레이어가 토끼를 내면 4장, 본인에겐 적용 안됨", () => {
+  const state = freshState();
+  const player = currentPlayer(state);
+  const opponent = opponentOf(state, player);
+  opponent.traitId = "beastmaster";
+  setDrawPile(state, ["rabbit-3"]);
+  applyAction(state, { type: "DRAW" });
+  assert.equal(state.requiredExtraDraws, 4);
+});
+
+test("26b. 토끼 행동 전문가 본인이 토끼를 내면 기본 2장 그대로", () => {
+  const state = freshState();
+  const player = currentPlayer(state);
+  player.traitId = "beastmaster";
+  setDrawPile(state, ["rabbit-3"]);
+  applyAction(state, { type: "DRAW" });
+  assert.equal(state.requiredExtraDraws, 2);
+});
+
+test("27. 공작 애호가: 공작을 접수하면 즉시 입원하고 진료 줄에서 빠진다", () => {
+  const state = freshState();
+  const player = currentPlayer(state);
+  player.traitId = "casanova";
+  setDrawPile(state, ["peacock-6"]);
+  applyAction(state, { type: "DRAW" });
+  assert.equal(state.playArea.length, 0);
+  assert.deepEqual(player.hospitalStacks.peacock, ["peacock-6"]);
+});
+
+test("28. 확장형 거북이 보호대: 거북이+다음 2장 보호, 대소동 유발 카드는 예외", () => {
+  const state = freshState({ playerNames: ["A", "B", "C"] });
+  const current = currentPlayer(state);
+  const holder = state.players.find((p) => p.playerId !== current.playerId); // 제3자가 보유해도 전역 적용
+  holder.traitId = "safe_harbor";
+  setDrawPile(state, ["turtle-3", "dog-4", "cat-4", "dog-5"]);
+  applyAction(state, { type: "DRAW" }); // turtle-3
+  applyAction(state, { type: "DRAW" }); // dog-4 (보호 카운트다운 2→1)
+  applyAction(state, { type: "DRAW" }); // cat-4 (카운트다운 1→0)
+  applyAction(state, { type: "DRAW" }); // dog-5 중복 → 대소동
+  assert.equal(state.playArea.length, 0);
+  assert.deepEqual(current.hospitalStacks.turtle, ["turtle-3"]);
+  assert.deepEqual(current.hospitalStacks.dog, ["dog-4"]);
+  assert.deepEqual(current.hospitalStacks.cat, ["cat-4"]);
+  assert.ok(state.discardPile.includes("dog-5")); // 유발 카드는 보호 대상이라도 획득 못함
+});
+
+test("29. 강아지 공포증: 상대를 공격하지 못하고 공격자가 대신 카드를 잃는다", () => {
+  const state = freshState({ playerNames: ["A", "B"] });
+  const player = currentPlayer(state);
+  const opponent = opponentOf(state, player);
+  opponent.traitId = "misfire";
+  opponent.hospitalStacks.cat.push("cat-4");
+  player.hospitalStacks.hamster.push("hamster-3");
+  setDrawPile(state, ["dog-3"]);
+  applyAction(state, { type: "DRAW" });
+  assert.deepEqual(opponent.hospitalStacks.cat, ["cat-4"]); // 상대 카드는 그대로
+  assert.equal(player.hospitalStacks.hamster.length, 0); // 공격자 자신이 잃음
+  assert.ok(state.discardPile.includes("hamster-3"));
+});
+
+test("30. 부엉이 영상 판독가: 3장을 순서대로 보여주지만 첫 장만 접수 가능", () => {
+  const state = freshState();
+  const player = currentPlayer(state);
+  player.traitId = "mystic";
+  setDrawPile(state, ["owl-3", "cat-5", "dog-4", "turtle-3"]);
+  applyAction(state, { type: "DRAW" });
+  assert.deepEqual(state.pendingDecision.previewCardIds, ["cat-5", "dog-4", "turtle-3"]);
+  const legal = getLegalActions(state);
+  const takeable = legal.filter((a) => a.type === "DECIDE" && a.value.action === "take").map((a) => a.value.cardId);
+  assert.deepEqual(takeable, ["cat-5"]);
+  assert.throws(() => applyAction(state, { type: "DECIDE", value: { action: "take", cardId: "dog-4" } }));
+});
+
+test("31. 간식 가로채기: 조합 완성 시 귀가 더미 대신 지정한 상대 병원에서 가져온다", () => {
+  const state = freshState({ playerNames: ["A", "B", "C"] });
+  const current = currentPlayer(state);
+  const targets = state.players.filter((p) => p.playerId !== current.playerId);
+  targets[0].traitId = "plunderer"; // 제3자가 보유해도 전역 적용
+  targets[1].hospitalStacks.cat.push("cat-2", "cat-5");
+  targets[1].hospitalStacks.dog.push("dog-3");
+  const discardBefore = state.discardPile.length;
+  setDrawPile(state, ["hamster-3", "almond-4"]);
+  applyAction(state, { type: "DRAW" });
+  applyAction(state, { type: "DRAW" });
+  applyAction(state, { type: "BANK" });
+  assert.equal(state.pendingDecision.type, "plunder_choose_target");
+  assert.deepEqual(
+    state.pendingDecision.options.slice().sort(),
+    [targets[0].playerId, targets[1].playerId].sort()
+  );
+  applyAction(state, { type: "DECIDE", value: targets[1].playerId });
+  assert.equal(state.discardPile.length, discardBefore); // 귀가 더미에서는 안 가져옴
+  assert.equal(totalHospitalCardCount(targets[1]), 1); // 3장 중 2장(보너스 수)을 털림
+  assert.equal(totalHospitalCardCount(current), 4); // 은행한 2장 + 약탈한 2장
+});
+
+test("32. 옆 병원 당직자: 특기 선택 시 대상 지정 단계가 추가된다", () => {
+  const state = freshState({ useTraits: true });
+  const firstPlayerId = state.pendingDecision.playerId;
+  state.traitOffers[firstPlayerId] = ["harbor_watch", "swordsman"];
+  state.pendingDecision.options = ["harbor_watch", "swordsman"];
+  applyAction(state, { type: "SELECT_TRAIT", traitId: "harbor_watch" });
+  assert.equal(state.pendingDecision.type, "harbor_watch_target");
+  assert.ok(!state.pendingDecision.options.includes(firstPlayerId)); // 자기 자신은 대상에서 제외
+  const targetId = state.pendingDecision.options[0];
+  applyAction(state, { type: "SELECT_HARBOR_TARGET", targetPlayerId: targetId });
+  const holder = state.players.find((p) => p.playerId === firstPlayerId);
+  assert.equal(holder.traitId, "harbor_watch");
+  assert.equal(holder.harborWatchTargetId, targetId);
+});
+
+test("33. 옆 병원 당직자: 지정한 대상이 대소동을 내면 그 카드들이 내 병원으로", () => {
+  const state = freshState({ playerNames: ["A", "B", "C"] });
+  const target = currentPlayer(state);
+  const holder = state.players.find((p) => p.playerId !== target.playerId);
+  holder.traitId = "harbor_watch";
+  holder.harborWatchTargetId = target.playerId;
+  setDrawPile(state, ["dog-4", "dog-5"]);
+  applyAction(state, { type: "DRAW" });
+  applyAction(state, { type: "DRAW" }); // 중복 → 대소동
+  assert.deepEqual(holder.hospitalStacks.dog.slice().sort(), ["dog-4", "dog-5"].sort());
+  assert.equal(state.discardPile.includes("dog-4"), false);
+  assert.equal(state.discardPile.includes("dog-5"), false);
+});
+
+test("34. 공작 품평 전문가: 공작 카드 점수 +5", () => {
+  const state = freshState();
+  const player = currentPlayer(state);
+  player.traitId = "golden_scales";
+  player.hospitalStacks.peacock.push("peacock-6");
+  assert.equal(computeScore(state, player), 11);
 });
