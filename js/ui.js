@@ -30,7 +30,6 @@ const AI_THINK_DELAY_MS = 1300; // 사람처럼 살짝 고민하는 느낌
 const BUST_AUTO_DISMISS_MS = 2600;
 
 const gameArea = () => document.getElementById("game-area");
-const actionBar = () => document.getElementById("action-bar");
 
 export function startApp() {
   document.addEventListener("click", onClick);
@@ -121,29 +120,28 @@ function render() {
 }
 
 function renderActionBar() {
-  const bar = actionBar();
-  const rulesBtn = document.getElementById("rules-btn");
-  bar.querySelectorAll("[data-mla-main]").forEach((el) => el.remove());
+  const primary = document.getElementById("action-bar-primary");
+  const surrenderBtn = document.getElementById("surrender-btn");
+  primary.innerHTML = "";
 
-  if (!game || pendingBust) return;
-  if (game.phase === "game_over" || game.phase === "trait_selection" || game.phase === "variant_selection") return;
+  if (!game || pendingBust) {
+    surrenderBtn.hidden = true;
+    return;
+  }
+  if (game.phase === "game_over" || game.phase === "trait_selection" || game.phase === "variant_selection") {
+    surrenderBtn.hidden = true;
+    return;
+  }
 
-  // 항복은 누구 차례든(심지어 AI가 고민 중일 때도) 바로 게임을 끝낼 수 있어야 하므로,
-  // 두 경로(AI 고민 중 / 사람 차례) 모두 rules-btn 바로 앞에 넣어준다.
-  const surrenderBtn = document.createElement("button");
-  surrenderBtn.textContent = "🏳️ 항복";
-  surrenderBtn.className = "mla-rules-btn";
-  surrenderBtn.setAttribute("data-mla-main", "1");
-  surrenderBtn.setAttribute("data-action", "surrender");
+  // 항복은 누구 차례든(심지어 AI가 고민 중일 때도) 바로 게임을 끝낼 수 있어야 한다.
+  surrenderBtn.hidden = false;
 
   const actor = currentActor();
   if (actor && actor.isAI) {
     const thinking = document.createElement("span");
     thinking.className = "mla-pill mla-pill-soft";
-    thinking.setAttribute("data-mla-main", "1");
     thinking.textContent = `🤖 ${actor.displayName}님이 고민 중...`;
-    bar.insertBefore(thinking, rulesBtn);
-    bar.insertBefore(surrenderBtn, rulesBtn);
+    primary.appendChild(thinking);
     return;
   }
 
@@ -153,20 +151,17 @@ function renderActionBar() {
 
   const drawBtn = document.createElement("button");
   drawBtn.textContent = game.playArea.length === 0 ? "진료 시작하기" : "환자 더 받기";
-  drawBtn.setAttribute("data-mla-main", "1");
   drawBtn.setAttribute("data-action", "draw");
   drawBtn.disabled = !canDraw;
 
   const bankBtn = document.createElement("button");
   bankBtn.textContent = "진료 마치기";
   bankBtn.className = "mla-bank-btn";
-  bankBtn.setAttribute("data-mla-main", "1");
   bankBtn.setAttribute("data-action", "bank");
   bankBtn.disabled = !canBank;
 
-  bar.insertBefore(drawBtn, rulesBtn);
-  bar.insertBefore(bankBtn, rulesBtn);
-  bar.insertBefore(surrenderBtn, rulesBtn);
+  primary.appendChild(drawBtn);
+  primary.appendChild(bankBtn);
 }
 
 function regenNameFields() {
