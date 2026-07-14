@@ -130,6 +130,7 @@ export function setupScreenHtml() {
         <option value="4">4명</option>
       </select>
     </div>
+    <p class="mla-muted" style="margin:-4px 0 10px">🤖 체크하면 그 자리는 AI가 대신 플레이해요.</p>
     <div id="mla-name-fields"></div>
     <div class="mla-setup-field">
       <label><input type="checkbox" name="useTraits" /> 수의사 특기 사용 (각자 특기 1개 선택)</label>
@@ -152,10 +153,10 @@ export function nameFieldsHtml(count) {
   for (let i = 0; i < count; i++) {
     html += `<div class="mla-setup-field">
       <label>플레이어 ${i + 1} 이름</label>
-      <div class="mla-row" style="align-items:center; flex-wrap:nowrap; gap:8px;">
-        <input type="text" name="playerName" maxlength="10" value="${esc(defaults[i])}" style="flex:1" />
-        <label class="mla-ai-toggle">
-          <input type="checkbox" name="playerIsAI" value="${i}" /> 🤖 AI
+      <div class="mla-row" style="align-items:center; flex-wrap:nowrap; gap:6px;">
+        <input type="text" name="playerName" maxlength="10" value="${esc(defaults[i])}" style="width:calc(100% - 46px); min-width:0;" />
+        <label class="mla-ai-toggle" title="AI가 대신 플레이">
+          <input type="checkbox" name="playerIsAI" value="${i}" /> 🤖
         </label>
       </div>
     </div>`;
@@ -281,10 +282,17 @@ function playAreaHtml(state) {
   const lastCard = getCard(state.playArea[lastIdx]);
   const lastAnimal = ANIMALS[lastCard.suit];
 
+  // 결정(원숭이/강아지/고양이/두더지/부엉이 등)이 대기 중이면 그 안내문이 이미 같은 내용을
+  // 더 구체적으로 설명하므로, 일반 능력 한 줄 설명은 생략한다 (안 그러면 "강아지"가 두 번
+  // 나온 것처럼 중복되어 보이는 문제가 있었음).
+  const abilityLine = state.pendingDecision
+    ? ""
+    : `<p class="mla-ability-line">${lastAnimal.icon} <b>${esc(lastAnimal.name)}</b> — ${esc(lastAnimal.description)}</p>`;
+
   return `<div class="mla-panel">
     <h3>현재 진료 줄</h3>
     <div class="mla-row">${cards}</div>
-    <p class="mla-ability-line">${lastAnimal.icon} <b>${esc(lastAnimal.name)}</b> — ${esc(lastAnimal.description)}</p>
+    ${abilityLine}
     ${state.protectedCardIds.length ? `<p class="mla-muted">🛡️ 초록 테두리 카드는 거북이가 보호하고 있어요.</p>` : ""}
     ${inlineRevealRow(state)}
     ${inlineDecisionBanner(state)}
@@ -322,8 +330,9 @@ function bustAreaHtml(state, bustInfo) {
 }
 
 export function gameBoardHtml(state, { bustInfo = null } = {}) {
-  const others = state.players.filter((p) => !p.isCurrentPlayer);
-  const me = state.players.find((p) => p.isCurrentPlayer);
+  // 입원실 순서는 누구 차례인지와 무관하게 항상 고정한다: 내(1번 플레이어) 입원실이 맨 위,
+  // 나머지는 자리(플레이) 순서대로. 차례가 바뀔 때마다 패널이 재배치되면 헷갈리기 때문.
+  const [me, ...others] = state.players;
   const area = bustInfo ? bustAreaHtml(state, bustInfo) : playAreaHtml(state);
   return `
     ${statusBarHtml(state, bustInfo)}

@@ -43,7 +43,10 @@
                env(safe-area-inset-bottom) env(safe-area-inset-left);
     }
     /* 액션 버튼은 스크롤 영역 밖에 고정, 가변 콘텐츠만 내부 스크롤 */
-    #game-area { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 10px 12px 4px; }
+    /* overflow-x:hidden 명시 필수 — overflow-y만 auto로 두면 스펙상 overflow-x도 auto로
+       강제되어, 안쪽에서 폭이 살짝 넘치는 요소가 있으면 화면 전체가 옆으로 밀리는(가로 스크롤)
+       버그가 생긴다 (실제로 이름 입력창+AI 체크박스 줄에서 발생했던 문제). */
+    #game-area { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; padding: 10px 12px 4px; }
     #action-bar {
       flex: 0 0 auto; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
       display: flex; gap: 8px; justify-content: center; background: var(--panel-soft);
@@ -87,9 +90,11 @@
     }
     .mla-flip-face.mla-flip-front { transform: rotateY(180deg); margin: 0; }
     @keyframes mla-cardflip { from { transform: rotateY(0deg); } to { transform: rotateY(180deg); } }
+    /* flex-shrink:0 + auto basis에 기대지 않고 폭을 못박아서 브라우저의 축소 계산 오차로
+       옆의 input과 함께 좁은 화면에서 잘리던 문제를 원천 차단한다. */
     .mla-ai-toggle {
-      display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 13px;
-      color: var(--ink-soft); flex: 0 0 auto;
+      display: flex; align-items: center; justify-content: center; gap: 2px;
+      font-size: 16px; color: var(--ink-soft); flex: 0 0 40px; width: 40px; box-sizing: border-box;
     }
 
     /* 직접 선택 가능한 카드: 은은하게 두근거리며 탭을 유도 */
@@ -172,6 +177,9 @@
     .mla-setup-field input, .mla-setup-field select {
       width: 100%; padding: 10px; border-radius: 10px; border: 2px solid var(--border); font-size: 15px; background: #fff;
     }
+    /* flex:1 인 input이 옆의 AI 체크박스 라벨과 한 줄에 있을 때, input의 기본 min-width(auto)가
+       내용 기준 최소폭을 강제해 좁은 화면에서 옆으로 넘치던 버그의 핵심 원인 — 반드시 0으로. */
+    .mla-setup-field input[type="text"] { min-width: 0; }
     .mla-trait-card { border: 2px solid var(--border); border-radius: 14px; padding: 12px; margin-bottom: 8px; background: var(--panel); }
     .mla-trait-card h4 { margin: 0 0 4px; }
     .mla-hidden-veil {
