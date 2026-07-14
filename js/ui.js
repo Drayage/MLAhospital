@@ -6,6 +6,7 @@ import { saveGame, loadGame, clearGame } from "./storage.js";
 import { playSfx, startBgm, stopBgm } from "./audio.js";
 import { HOSPITAL } from "./palettes.js";
 import { ANIMALS } from "./data/animals.js";
+import { getTrait } from "./data/traits.js";
 import { getCard } from "./data/cards.js";
 import { chooseAiAction } from "./ai.js";
 import {
@@ -204,6 +205,13 @@ function onClick(e) {
   const actionBtn = e.target.closest("[data-action]");
   if (actionBtn) {
     handleActionClick(actionBtn);
+    return;
+  }
+  // 특기 줄을 탭하면 그 특기의 설명을 보여준다 (능력 카드 탭 정보와 같은 자리/느낌).
+  const traitEl = e.target.closest("[data-info-trait]");
+  if (traitEl) {
+    playSfx(HOSPITAL, "tap");
+    showTraitInfo(traitEl.getAttribute("data-info-trait"));
     return;
   }
   // 능력 버튼이 아니면: 카드(내 것이든 남의 것이든, 빈 칸이든)를 탭했을 때 한 줄 설명을 보여준다.
@@ -414,8 +422,8 @@ function showToast(msg, variant) {
   el.textContent = msg;
   el.classList.add("mla-show");
   clearTimeout(showToast._t);
-  // 왕관 획득처럼 특별한 순간은 조금 더 오래 보여준다.
-  const duration = variant === "crown" ? 2600 : 1600;
+  // 왕관 획득처럼 특별한 순간은 조금 더, 능력/특기 설명처럼 읽을 게 많은 것도 더 오래 보여준다.
+  const duration = variant === "crown" ? 2600 : variant === "info" ? 3200 : 1600;
   showToast._t = setTimeout(() => el.classList.remove("mla-show"), duration);
 }
 
@@ -424,8 +432,6 @@ function showToast(msg, variant) {
 function showAbilityInfo(suit, playerId) {
   const animal = ANIMALS[suit];
   if (!animal) return;
-  const el = document.getElementById("mla-toast");
-  if (!el) return;
 
   let stackNote = "";
   if (playerId && game) {
@@ -437,11 +443,14 @@ function showAbilityInfo(suit, playerId) {
     }
   }
 
-  el.classList.remove("mla-toast-crown");
-  el.textContent = `${animal.icon} ${animal.name} — ${animal.description}${stackNote}`;
-  el.classList.add("mla-show", "mla-toast-info");
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => el.classList.remove("mla-show", "mla-toast-info"), 3200);
+  showToast(`${animal.icon} ${animal.name} — ${animal.description}${stackNote}`, "info");
+}
+
+// 특기 줄을 탭했을 때 그 특기의 설명을 보여준다 (원작 특기 이름도 함께).
+function showTraitInfo(traitId) {
+  const trait = getTrait(traitId);
+  if (!trait) return;
+  showToast(`🩺 ${trait.name}(${trait.originalName}) — ${trait.description}`, "info");
 }
 
 function persistAndRender() {

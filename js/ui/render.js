@@ -114,7 +114,7 @@ export function playerPanelHtml(state, player, aiThinking) {
       <span>${isTurn ? "▶ " : ""}${hasCrown ? '<span class="mla-crown-badge" title="응급실의 왕 — 왕관 보유 중 (+10점)">👑</span> ' : ""}${player.isAI ? "🤖 " : ""}${esc(player.displayName)}</span>
       <span class="mla-pill mla-pill-soft">점수 ${score}</span>
     </div>
-    ${traitName ? `<div class="mla-muted">특기: ${esc(traitName)}</div>` : ""}
+    ${traitName ? `<div class="mla-muted mla-trait-line" data-info-trait="${player.traitId}">특기: <u>${esc(traitName)}</u></div>` : ""}
     <div class="mla-row">${hospitalHtml(player, { selectable })}</div>
   </div>`;
 }
@@ -418,10 +418,11 @@ export function gameBoardHtml(state, { bustInfo = null, aiThinking = false, alre
   // 나머지는 자리(플레이) 순서대로. 차례가 바뀔 때마다 패널이 재배치되면 헷갈리기 때문.
   const [me, ...others] = state.players;
   const area = bustInfo ? bustAreaHtml(state, bustInfo) : playAreaHtml(state, aiThinking, alreadyFlippedCardId);
+  const hint = state.mode.useTraits ? "카드나 특기를 탭하면 설명을 볼 수 있어요" : "카드를 탭하면 능력을 볼 수 있어요";
   return `
     ${statusBarHtml(state, bustInfo)}
     ${area}
-    <div class="mla-panel"><h3>입원실 <span class="mla-muted" style="font-weight:400">(카드를 탭하면 능력을 볼 수 있어요)</span></h3>${playerPanelHtml(state, me, aiThinking)}${others.map((p) => playerPanelHtml(state, p, aiThinking)).join("")}</div>
+    <div class="mla-panel"><h3>입원실 <span class="mla-muted" style="font-weight:400">(${hint})</span></h3>${playerPanelHtml(state, me, aiThinking)}${others.map((p) => playerPanelHtml(state, p, aiThinking)).join("")}</div>
   `;
 }
 
