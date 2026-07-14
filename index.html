@@ -93,12 +93,19 @@
     }
 
     /* 직접 선택 가능한 카드: 은은하게 두근거리며 탭을 유도 */
-    .mla-suit-card.mla-selectable, .mla-flip-face.mla-flip-front.mla-selectable {
+    .mla-suit-card.mla-selectable {
       cursor: pointer; border-color: var(--accent-strong);
       box-shadow: 0 0 0 3px #ffd9b8, var(--shadow);
       animation: mla-pulse 1.1s ease-in-out infinite;
     }
     @keyframes mla-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+    /* flip 카드는 얼굴 자체가 rotateY 고정 transform을 쓰므로, 바깥 래퍼에만 펄스를 건다
+       (transform 애니메이션을 얼굴에 같이 걸면 rotateY가 지워져 카드가 안 보이게 된다) */
+    .mla-flip-outer.mla-selectable-flip {
+      cursor: pointer; border-radius: 10px;
+      box-shadow: 0 0 0 3px #ffd9b8;
+      animation: mla-pulse 1.1s ease-in-out infinite;
+    }
     .mla-suit-card.mla-dim { opacity: 0.32; filter: grayscale(45%); }
     .mla-decision-banner {
       margin: 8px 0 2px; padding: 8px 10px; background: #fff1de; border: 2px dashed var(--accent-strong);

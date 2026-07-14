@@ -23,9 +23,13 @@ export function cardHtml(cardId, opts = {}) {
   if (opts.protected) cls.push("mla-protected");
   if (opts.ghost) cls.push("mla-ghost");
   if (opts.dim) cls.push("mla-dim");
-  if (opts.decideValue !== undefined) cls.push("mla-selectable");
   if (opts.lost) cls.push("mla-bust-lost");
   if (opts.triggering) cls.push("mla-bust-trigger");
+  // flip 카드가 아닐 때만 얼굴 자체에 셀렉터블 펄스(transform:scale)를 건다.
+  // flip 카드의 얼굴은 뒤집기용 rotateY가 고정 transform으로 걸려 있어서, 같은 요소에
+  // transform 애니메이션을 더 얹으면 rotateY가 지워져 카드가 안 보이는 버그가 생긴다
+  // (실제로 두더지/부엉이 카드가 사라지는 버그의 원인이었음) — 대신 바깥 래퍼에 건다.
+  if (opts.decideValue !== undefined && !opts.flip) cls.push("mla-selectable");
 
   const attrs = [`title="${esc(animal.name)} ${card.value} — ${esc(animal.description)}"`, `data-info-suit="${card.suit}"`];
   if (opts.decideValue !== undefined) attrs.push(`data-action="decide"`, `data-value='${esc(JSON.stringify(opts.decideValue))}'`);
@@ -40,7 +44,8 @@ export function cardHtml(cardId, opts = {}) {
     const tension = Math.min(opts.tension || 0, 9);
     const dur = (0.42 + tension * 0.07).toFixed(2);
     const delay = (0.12 + tension * 0.045).toFixed(2);
-    return `<div class="mla-flip-outer" ${attrStr}>
+    const outerCls = opts.decideValue !== undefined ? "mla-flip-outer mla-selectable-flip" : "mla-flip-outer";
+    return `<div class="${outerCls}" ${attrStr}>
       <div class="mla-flip-inner" style="animation-duration:${dur}s;animation-delay:${delay}s;">
         <div class="mla-flip-face mla-flip-back">🐾</div>
         <div class="mla-flip-face mla-flip-front ${cls.join(" ")}">${faceInner}</div>

@@ -5,6 +5,7 @@ import { saveGame, loadGame, clearGame } from "./storage.js";
 import { playSfx, startBgm } from "./audio.js";
 import { HOSPITAL } from "./palettes.js";
 import { ANIMALS } from "./data/animals.js";
+import { getCard } from "./data/cards.js";
 import { chooseAiAction } from "./ai.js";
 import {
   setupScreenHtml,
@@ -191,7 +192,8 @@ function onClick(e) {
   const infoEl = e.target.closest("[data-info-suit]");
   if (infoEl) {
     playSfx(HOSPITAL, "tap");
-    showAbilityInfo(infoEl.getAttribute("data-info-suit"));
+    const playerCard = infoEl.closest("[data-player-id]");
+    showAbilityInfo(infoEl.getAttribute("data-info-suit"), playerCard ? playerCard.getAttribute("data-player-id") : null);
   }
 }
 
@@ -247,19 +249,25 @@ function commitAction(engineAction) {
 
   const newEntries = game.actionLog.slice(logLenBefore);
   const bustEntry = newEntries.find((entry) => entry.type === "bust");
-  feedbackFor(engineAction, bustEntry);
+  const bankEntry = newEntries.find((entry) => entry.type === "bank");
+  feedbackFor(engineAction, bustEntry, bankEntry);
   revealedGateKey = null;
   if (bustEntry) pendingBust = bustEntry;
   persistAndRender();
 }
 
-function feedbackFor(action, bustEntry) {
+function feedbackFor(action, bustEntry, bankEntry) {
   if (bustEntry) {
     // 진료 줄 안에서 바로 보여주므로(흔들림+배지) 별도 토스트는 생략한다.
     playSfx(HOSPITAL, "error");
-  } else if (action.type === "BANK") {
+  } else if (bankEntry) {
     playSfx(HOSPITAL, "confirm");
-    showToast("✅ 진료를 마쳤어요");
+    // 볼빵빵(햄스터+아몬드) 보너스가 실제로 발동했는지 눈에 보이게 알려준다.
+    if (bankEntry.hasCombo) {
+      showToast(`🐹🥜 볼빵빵 보너스! 카드 ${bankEntry.bonusCards.length}장을 추가로 받았어요!`);
+    } else {
+      showToast("✅ 진료를 마쳤어요");
+    }
   } else if (game.phase === "game_over") {
     playSfx(HOSPITAL, "win");
   } else {
@@ -307,15 +315,28 @@ function showToast(msg) {
   showToast._t = setTimeout(() => el.classList.remove("mla-show"), 1600);
 }
 
-function showAbilityInfo(suit) {
+// suit 능력 설명 + (입원실 카드라면) 그 스택에 실제로 쌓여있는 숫자들도 함께 보여준다.
+// "×2" 배지가 어떤 숫자들로 쌓여있는지 궁금할 때를 위한 것.
+function showAbilityInfo(suit, playerId) {
   const animal = ANIMALS[suit];
   if (!animal) return;
   const el = document.getElementById("mla-toast");
   if (!el) return;
-  el.textContent = `${animal.icon} ${animal.name} — ${animal.description}`;
+
+  let stackNote = "";
+  if (playerId && game) {
+    const player = game.players.find((p) => p.playerId === playerId);
+    const stack = player && player.hospitalStacks[suit];
+    if (stack && stack.length > 0) {
+      const values = stack.map((cid) => getCard(cid).value).sort((a, b) => b - a);
+      stackNote = stack.length > 1 ? ` (보유: ${values.join(", ")} → 최고 ${values[0]}점 반영)` : ` (보유: ${values[0]})`;
+    }
+  }
+
+  el.textContent = `${animal.icon} ${animal.name} — ${animal.description}${stackNote}`;
   el.classList.add("mla-show", "mla-toast-info");
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => el.classList.remove("mla-show", "mla-toast-info"), 2800);
+  showToast._t = setTimeout(() => el.classList.remove("mla-show", "mla-toast-info"), 3200);
 }
 
 function persistAndRender() {
