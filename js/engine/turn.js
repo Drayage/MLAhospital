@@ -24,7 +24,7 @@ export function endTurnAndAdvance(state) {
   state.playArea = [];
   state.protectedCardIds = [];
   state.requiredExtraDraws = 0;
-  state.turnFlags = { monkeyRecalledCardIds: [], owlDrawnCardIds: [], safeHarborRemaining: 0 };
+  state.turnFlags = { monkeyRecalledCardIds: [], owlDrawnCardIds: [], safeHarborRemaining: 0, hospitalizedSuitsThisTurn: [] };
   state.pendingDecision = null;
   state.phase = "turn_start";
 }

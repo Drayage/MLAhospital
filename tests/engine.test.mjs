@@ -8,8 +8,8 @@ import { getLegalActions, applyAction } from "../js/engine/actions.js";
 import { endTurnAndAdvance } from "../js/engine/turn.js";
 import { computeScore, finishGame } from "../js/engine/scoring.js";
 import { totalHospitalCardCount } from "../js/engine/hospital.js";
-import { CARD_POOL } from "../js/data/cards.js";
-import { PEACOCK_VALUES } from "../js/data/animals.js";
+import { CARD_POOL, getCard } from "../js/data/cards.js";
+import { PEACOCK_VALUES, SUITS } from "../js/data/animals.js";
 
 function freshState(opts = {}) {
   return createGame({ playerNames: ["A", "B", "C"], useTraits: false, variantMode: "none", seed: 42, ...opts });
@@ -457,4 +457,103 @@ test("34. 공작 품평 전문가: 공작 카드 점수 +5", () => {
   player.traitId = "golden_scales";
   player.hospitalStacks.peacock.push("peacock-6");
   assert.equal(computeScore(state, player), 11);
+});
+
+// ── 특수 모드 3종 (파티모드/응급실의 왕/심심한 모드) 검증 ──────────────
+
+test("35. 파티모드: 카드가 2배(120장)로 생성되고 접미사가 붙은 ID도 정상 조회된다", () => {
+  const state = createGame({ playerNames: ["A", "B"], useTraits: false, variantMode: "none", deckMultiplier: 2, seed: 7 });
+  assert.equal(state.discardPile.length + state.drawPile.length, 120);
+  const suffixedId = [...state.discardPile, ...state.drawPile].find((id) => /-[ab]$/.test(id));
+  assert.ok(suffixedId, "접미사가 붙은 카드 ID가 존재해야 한다");
+  const card = getCard(suffixedId);
+  assert.ok(SUITS.includes(card.suit));
+  assert.equal(typeof card.value, "number");
+});
+
+test("36. 파티모드: 두 벌짜리 카드로도 교착 없이 정상 진행된다", () => {
+  const state = createGame({ playerNames: ["A", "B", "C"], useTraits: false, variantMode: "none", deckMultiplier: 2, seed: 8 });
+  let steps = 0;
+  while (state.phase !== "game_over" && steps < 3000) {
+    const legal = getLegalActions(state);
+    assert.ok(legal.length > 0, "교착 상태가 발생했다");
+    applyAction(state, legal[0]);
+    steps++;
+  }
+  assert.equal(state.phase, "game_over");
+});
+
+test("37. 심심한 모드: 거북이가 이전 카드를 보호하지 않는다", () => {
+  const state = freshState({ noAbilities: true });
+  setDrawPile(state, ["dog-4", "turtle-3", "dog-5"]);
+  applyAction(state, { type: "DRAW" });
+  applyAction(state, { type: "DRAW" });
+  applyAction(state, { type: "DRAW" }); // dog-5가 dog-4와 겹쳐 대소동
+  const bustEntry = state.actionLog.findLast((e) => e.type === "bust");
+  assert.deepEqual(bustEntry.protectedCardIds, []);
+  assert.deepEqual(bustEntry.lostCardIds.slice().sort(), ["dog-4", "dog-5", "turtle-3"].sort());
+});
+
+test("38. 심심한 모드: 토끼가 추가 접수를 강제하지 않는다", () => {
+  const state = freshState({ noAbilities: true });
+  setDrawPile(state, ["rabbit-3"]);
+  applyAction(state, { type: "DRAW" });
+  assert.equal(state.requiredExtraDraws, 0);
+  const legal = getLegalActions(state);
+  assert.ok(legal.some((a) => a.type === "BANK"));
+});
+
+test("39. 심심한 모드: 볼빵빵(햄스터+아몬드) 콤보가 발동하지 않는다", () => {
+  const state = freshState({ noAbilities: true });
+  setDrawPile(state, ["hamster-3", "almond-4"]);
+  applyAction(state, { type: "DRAW" });
+  applyAction(state, { type: "DRAW" });
+  applyAction(state, { type: "BANK" });
+  const bankEntry = state.actionLog.findLast((e) => e.type === "bank");
+  assert.equal(bankEntry.hasCombo, false);
+  assert.deepEqual(bankEntry.bonusCards, []);
+});
+
+test("40. 응급실의 왕: 한 턴에 10종류 모두 입원시키면 왕관을 얻고 점수에 +10 반영된다", () => {
+  const state = freshState({ kingOfEr: true });
+  const player = currentPlayer(state);
+  state.phase = "waiting_for_choice";
+  state.playArea = ["turtle-3", "monkey-3", "dog-3", "hamster-3", "almond-3", "mole-3", "owl-3", "cat-3", "peacock-5", "rabbit-3"];
+  applyAction(state, { type: "BANK" });
+  assert.equal(state.crownHolderId, player.playerId);
+  assert.ok(state.actionLog.some((e) => e.type === "crown_awarded" && e.playerId === player.playerId));
+  assert.equal(computeScore(state, player), 42); // 각 최고값 합(3×8+5+3=32) + 왕관 보너스(10)
+  assert.deepEqual(state.turnFlags.hospitalizedSuitsThisTurn, []); // 다음 턴을 위해 초기화됨
+});
+
+test("41. 응급실의 왕: 9종류만 입원시키면(조합 없이) 왕관을 얻지 못한다", () => {
+  const state = freshState({ kingOfEr: true });
+  state.phase = "waiting_for_choice";
+  state.playArea = ["turtle-3", "monkey-3", "dog-3", "hamster-3", "mole-3", "owl-3", "cat-3", "peacock-5", "rabbit-3"]; // 아몬드 없음(콤보 방지), 9종
+  applyAction(state, { type: "BANK" });
+  assert.equal(state.crownHolderId, null);
+});
+
+test("42. 응급실의 왕: 왕관은 가장 최근 성공자에게 넘어간다", () => {
+  const state = freshState({ playerNames: ["A", "B"], kingOfEr: true });
+  const [a, b] = state.players;
+  state.currentPlayerIndex = a.seatIndex;
+  state.phase = "waiting_for_choice";
+  state.playArea = ["turtle-3", "monkey-3", "dog-3", "hamster-3", "almond-3", "mole-3", "owl-3", "cat-3", "peacock-5", "rabbit-3"];
+  applyAction(state, { type: "BANK" });
+  assert.equal(state.crownHolderId, a.playerId);
+  assert.equal(currentPlayer(state).playerId, b.playerId); // 턴이 넘어감
+
+  state.phase = "waiting_for_choice";
+  state.playArea = ["turtle-4", "monkey-4", "dog-4", "hamster-4", "almond-4", "mole-4", "owl-4", "cat-4", "peacock-6", "rabbit-4"];
+  applyAction(state, { type: "BANK" });
+  assert.equal(state.crownHolderId, b.playerId); // 왕관이 넘어갔다
+});
+
+test("43. 응급실의 왕: 비활성화 상태에서는 10종류를 입원시켜도 왕관이 없다", () => {
+  const state = freshState({ kingOfEr: false });
+  state.phase = "waiting_for_choice";
+  state.playArea = ["turtle-3", "monkey-3", "dog-3", "hamster-3", "almond-3", "mole-3", "owl-3", "cat-3", "peacock-5", "rabbit-3"];
+  applyAction(state, { type: "BANK" });
+  assert.equal(state.crownHolderId, null);
 });

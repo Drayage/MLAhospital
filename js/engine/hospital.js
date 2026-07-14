@@ -1,6 +1,7 @@
 // 입원실(hospitalStacks) 조작 헬퍼 — 명세 5.1/6.4.2/11장.
 import { getCard } from "../data/cards.js";
-import { logAction } from "./state.js";
+import { SUITS } from "../data/animals.js";
+import { logAction, currentPlayer } from "./state.js";
 
 // 스택 안에서 가장 숫자가 높은 카드 ID (없으면 null). "맨 위"의 정의.
 export function getTopCardId(stack) {
@@ -41,6 +42,18 @@ export function gainCardToHospital(state, player, cardId) {
   const card = getCard(cardId);
   player.hospitalStacks[card.suit].push(cardId);
   logAction(state, { type: "gain_card", playerId: player.playerId, cardId });
+
+  // 응급실의 왕: "이번 턴 당사자"가 입원시킨 카드만 왕관 조건에 셈한다 — 옆 병원
+  // 당직자가 남의 대소동으로 카드를 대신 받거나, 다른 플레이어가 간식 가로채기로
+  // 카드를 뺏기는 건 "그 사람의 턴"이 아니므로 왕관 진행에 포함되지 않는다.
+  if (state.mode.kingOfEr && player.playerId === currentPlayer(state).playerId) {
+    const set = state.turnFlags.hospitalizedSuitsThisTurn;
+    if (!set.includes(card.suit)) set.push(card.suit);
+    if (set.length >= SUITS.length && state.crownHolderId !== player.playerId) {
+      state.crownHolderId = player.playerId;
+      logAction(state, { type: "crown_awarded", playerId: player.playerId });
+    }
+  }
 }
 
 export function hasAnyHospitalCards(player) {

@@ -18,7 +18,8 @@ function playAreaHasSuit(state, suit) {
 
 export function applyBank(state) {
   const player = currentPlayer(state);
-  const hasCombo = playAreaHasSuit(state, "hamster") && playAreaHasSuit(state, "almond");
+  // 심심한 모드에서는 볼빵빵 콤보도 비활성 — 능력 없는 순수 숫자 카드 게임이 된다.
+  const hasCombo = !state.mode.noAbilities && playAreaHasSuit(state, "hamster") && playAreaHasSuit(state, "almond");
   const bankedCount = state.playArea.length;
 
   for (const cid of state.playArea) gainCardToHospital(state, player, cid);

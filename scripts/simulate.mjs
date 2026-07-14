@@ -33,8 +33,12 @@ function createSimGame(i) {
   const playerNames = PLAYER_NAME_SETS[Math.floor(rng() * PLAYER_NAME_SETS.length)];
   const useTraits = rng() < 0.5;
   const variantMode = VARIANT_MODES[Math.floor(rng() * VARIANT_MODES.length)];
+  // 특수 모드 3종(파티모드/응급실의 왕/심심한 모드)도 무작위로 켜서 조합별 교착을 함께 훑는다.
+  const deckMultiplier = rng() < 0.3 ? 2 : 1;
+  const kingOfEr = rng() < 0.5;
+  const noAbilities = rng() < 0.3;
   const seed = Math.floor(rng() * 0xffffffff);
-  const game = createGame({ playerNames, useTraits, variantMode, seed });
+  const game = createGame({ playerNames, useTraits, variantMode, deckMultiplier, kingOfEr, noAbilities, seed });
   // 수동 변형/특기 선택 단계도 게임 자체 RNG(stepGame)로 무작위 진행시킨다.
   return game;
 }

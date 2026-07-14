@@ -18,6 +18,9 @@ function activeVariant(state) {
 }
 
 export function resolveSuitAbility(state, cardId) {
+  // 심심한 모드: 카드는 그냥 숫자 카드일 뿐 — 어떤 동물 능력도 발동하지 않는다
+  // (거북이 보호도, 토끼 강제 접수도 없다. 순수하게 겹침만 피하면 되는 게임이 된다).
+  if (state.mode.noAbilities) return;
   const card = getCard(cardId);
   const player = currentPlayer(state);
   switch (card.suit) {

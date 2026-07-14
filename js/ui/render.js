@@ -108,9 +108,10 @@ export function playerPanelHtml(state, player, aiThinking) {
   const score = computeScore(state, player);
   const traitName = player.traitId ? TRAITS[player.traitId].name : null;
   const selectable = computeSelectableForPlayer(state, player, aiThinking);
-  return `<div class="mla-player-card ${isTurn ? "mla-current" : ""} ${selectable ? "mla-decision-focus" : ""}" data-player-id="${player.playerId}">
+  const hasCrown = state.mode.kingOfEr && state.crownHolderId === player.playerId;
+  return `<div class="mla-player-card ${isTurn ? "mla-current" : ""} ${selectable ? "mla-decision-focus" : ""} ${hasCrown ? "mla-crowned" : ""}" data-player-id="${player.playerId}">
     <div class="mla-player-head">
-      <span>${isTurn ? "▶ " : ""}${player.isAI ? "🤖 " : ""}${esc(player.displayName)}</span>
+      <span>${isTurn ? "▶ " : ""}${hasCrown ? '<span class="mla-crown-badge" title="응급실의 왕 — 왕관 보유 중 (+10점)">👑</span> ' : ""}${player.isAI ? "🤖 " : ""}${esc(player.displayName)}</span>
       <span class="mla-pill mla-pill-soft">점수 ${score}</span>
     </div>
     ${traitName ? `<div class="mla-muted">특기: ${esc(traitName)}</div>` : ""}
@@ -137,6 +138,12 @@ export function setupScreenHtml() {
     <div id="mla-name-fields"></div>
     <div class="mla-setup-field">
       <label><input type="checkbox" name="useTraits" /> 수의사 특기 사용 (각자 특기 1개 선택)</label>
+    </div>
+    <div class="mla-setup-field">
+      <label>🎲 특수 모드 (여러 개 동시에 켤 수 있어요)</label>
+      <label style="margin-top:6px"><input type="checkbox" name="partyMode" /> 🎉 파티 모드 — 카드가 2배(120장)라 더 오래, 더 크게 쌓여요</label>
+      <label style="margin-top:6px"><input type="checkbox" name="kingOfEr" /> 👑 응급실의 왕 — 한 턴에 10종류를 모두 입원시키면 왕관(+10점)을 얻어요. 왕관은 하나뿐, 가장 최근 성공자가 가져가요</label>
+      <label style="margin-top:6px"><input type="checkbox" name="noAbilities" /> 😴 심심한 모드 — 동물 능력이 전부 사라지고 순수하게 숫자만 겨루는 게임이 돼요</label>
     </div>
     <div class="mla-setup-field">
       <label>오늘의 병원 규칙</label>
@@ -235,15 +242,25 @@ export function variantSelectionHtml(state) {
   </div>`;
 }
 
+function activeSpecialModeLabels(state) {
+  const labels = [];
+  if (state.mode.deckMultiplier > 1) labels.push("🎉 파티 모드");
+  if (state.mode.kingOfEr) labels.push("👑 응급실의 왕");
+  if (state.mode.noAbilities) labels.push("😴 심심한 모드");
+  return labels;
+}
+
 function statusBarHtml(state, bustInfo) {
   const player = bustInfo ? state.players.find((p) => p.playerId === bustInfo.playerId) : state.players[state.currentPlayerIndex];
   const variant = state.activeVariantId ? VARIANTS[state.activeVariantId] : null;
+  const specialModes = activeSpecialModeLabels(state);
   return `<div class="mla-panel">
     <div class="mla-row" style="justify-content:space-between; align-items:center;">
       <span class="mla-pill ${bustInfo ? "mla-pill-warn" : ""}">${player.isAI ? "🤖 " : ""}${esc(player.displayName)}님 ${bustInfo ? "대소동 발생!" : "진료 중"}</span>
       <span class="mla-muted">대기실 덱 ${state.drawPile.length}장 · 귀가 더미 ${state.discardPile.length}장</span>
     </div>
     ${variant ? `<div class="mla-muted" style="margin-top:6px">오늘의 규칙: <b>${esc(variant.name)}</b> — ${esc(variant.description)}</div>` : ""}
+    ${specialModes.length ? `<div class="mla-muted" style="margin-top:6px">특수 모드: <b>${specialModes.join(" · ")}</b></div>` : ""}
     ${
       !bustInfo && state.requiredExtraDraws > 0
         ? `<div class="mla-pill mla-pill-warn" style="margin-top:6px">🐰 토끼 가족이 몰려왔습니다! 환자를 ${state.requiredExtraDraws}가족 더 접수해야 합니다.</div>`
@@ -385,7 +402,7 @@ function bustAreaHtml(state, bustInfo) {
       })
     )
     .join("");
-  return `<div class="mla-panel">
+  return `<div class="mla-panel mla-bust-flash">
     <h3>현재 진료 줄</h3>
     <div class="mla-bust-banner">😱 ${cardLabel(bustInfo.triggeringCardId)}가 겹쳐서 대소동이 났어요!</div>
     <div class="mla-row">${cards}</div>
@@ -414,12 +431,13 @@ export function gameOverHtml(state, { surrendered = false } = {}) {
   const rows = ranked
     .map((p) => {
       const isWinner = winners.has(p.playerId);
-      return `<div class="mla-player-card ${isWinner ? "mla-current" : ""}">
+      const crownNote = state.mode.kingOfEr && state.crownHolderId === p.playerId ? " · 👑 왕관 +10점" : "";
+      return `<div class="mla-player-card ${isWinner && !surrendered ? "mla-winner-card" : ""}">
         <div class="mla-player-head">
-          <span>${isWinner ? "🏆 " : ""}${esc(p.displayName)}</span>
+          <span>${isWinner ? (surrendered ? "🏆 " : '<span class="mla-trophy-bounce">🏆</span> ') : ""}${esc(p.displayName)}</span>
           <span class="mla-pill">${p.score}점</span>
         </div>
-        <div class="mla-muted">보유 카드 ${totalHospitalCardCount(p)}장${p.traitId ? " · 특기: " + esc(TRAITS[p.traitId].name) : ""}</div>
+        <div class="mla-muted">보유 카드 ${totalHospitalCardCount(p)}장${p.traitId ? " · 특기: " + esc(TRAITS[p.traitId].name) : ""}${crownNote}</div>
         <div class="mla-row">${hospitalHtml(p, { showAll: false }) || '<span class="mla-muted">확보한 환자가 없어요</span>'}</div>
       </div>`;
     })
@@ -428,7 +446,7 @@ export function gameOverHtml(state, { surrendered = false } = {}) {
   const heading = surrendered
     ? `<h2>🏳️ 항복으로 진료를 마쳤어요</h2><p class="mla-muted" style="margin:0 0 6px">그 시점까지의 점수로 결과를 매겼어요.</p>`
     : `<h2>🎉 오늘의 진료 종료!</h2>`;
-  return `<div class="mla-panel mla-center">
+  return `<div class="mla-panel mla-center ${surrendered ? "" : "mla-victory-panel"}">
       ${heading}
       <p>${state.winnerIds.length > 1 ? "공동 우승" : "우승"}: <b>${esc(winnerNames)}</b></p>
     </div>

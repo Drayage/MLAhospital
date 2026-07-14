@@ -145,20 +145,34 @@
     }
     .mla-player-card.mla-decision-focus { border-color: var(--accent-strong); }
 
-    /* 대소동: 화면 전환 없이 같은 자리에서 흔들리고 흐려지는 것으로 표현 */
+    /* 대소동: 화면 전환 없이 같은 자리에서 흔들리고 흐려지는 것으로 표현 —
+       패널 전체가 잠깐 붉게 번쩍이고, 배너는 팝인 + 은은한 펄스로, 터진 카드는
+       충격으로 튕기듯 더 크게 흔들리게 해서 더 극적으로 느껴지게 했다. */
+    .mla-bust-flash { animation: mla-bust-panel-flash 0.5s ease; }
+    @keyframes mla-bust-panel-flash {
+      0% { box-shadow: 0 0 0 6px rgba(239, 142, 142, 0.7); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 142, 142, 0); }
+    }
     .mla-bust-banner {
       background: #ffe1de; border: 2px solid var(--bad); border-radius: 10px; padding: 8px 10px;
-      font-weight: 700; color: #7a2020; margin-bottom: 4px;
+      font-weight: 700; color: #7a2020; margin-bottom: 4px; font-size: 15px;
+      animation: mla-bust-banner-pop 0.3s cubic-bezier(.34,1.56,.64,1), mla-bust-banner-pulse 1s ease-in-out 0.3s infinite;
+    }
+    @keyframes mla-bust-banner-pop { 0% { transform: scale(0.7); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    @keyframes mla-bust-banner-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239, 142, 142, 0.45); }
+      50% { box-shadow: 0 0 0 6px rgba(239, 142, 142, 0); }
     }
     .mla-suit-card.mla-bust-trigger {
-      border-color: var(--bad); box-shadow: 0 0 0 3px #ffb3ab, var(--shadow); animation: mla-shake 0.4s ease;
+      border-color: var(--bad); box-shadow: 0 0 0 4px #ffb3ab, var(--shadow); animation: mla-shake 0.5s ease;
     }
     @keyframes mla-shake {
-      0%, 100% { transform: translateX(0) rotate(0); }
-      20% { transform: translateX(-5px) rotate(-4deg); }
-      40% { transform: translateX(5px) rotate(4deg); }
-      60% { transform: translateX(-4px) rotate(-2deg); }
-      80% { transform: translateX(3px) rotate(2deg); }
+      0% { transform: scale(1.18); }
+      10%, 90% { transform: translateX(-1px) rotate(0) scale(1.1); }
+      20%, 80% { transform: translateX(-8px) rotate(-6deg) scale(1.1); }
+      30%, 50%, 70% { transform: translateX(9px) rotate(6deg) scale(1.1); }
+      40%, 60% { transform: translateX(-9px) rotate(-6deg) scale(1.1); }
+      100% { transform: translateX(0) rotate(0) scale(1); }
     }
     .mla-suit-card.mla-bust-lost { opacity: 0.5; filter: grayscale(40%); }
     [data-bust-card] { transition: opacity .26s ease, transform .26s ease; }
@@ -168,6 +182,12 @@
       border: 2px solid var(--bad); background: #fff; color: #7a2020; font-weight: 700; font-size: 14px;
     }
     .mla-toast.mla-toast-info { background: var(--panel); color: var(--ink); border: 2px solid var(--accent-strong); }
+    /* 왕관 획득 토스트 — 금빛 그라데이션 + 팝인 연출로 다른 토스트보다 화려하게 */
+    .mla-toast.mla-toast-crown {
+      background: linear-gradient(135deg, #ffd76a, #f5a623); color: #4a2e00; font-weight: 800;
+      box-shadow: 0 4px 16px rgba(230, 160, 20, 0.5); animation: mla-crown-toast-pop 0.4s cubic-bezier(.34,1.56,.64,1);
+    }
+    @keyframes mla-crown-toast-pop { 0% { transform: translateX(-50%) scale(0.6); } 60% { transform: translateX(-50%) scale(1.08); } 100% { transform: translateX(-50%) scale(1); } }
     .mla-row { display: flex; flex-wrap: wrap; align-items: flex-start; }
     .mla-panel { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; }
     .mla-panel h3 { font-size: 13px; color: var(--ink-soft); letter-spacing: 0.02em; }
@@ -176,6 +196,24 @@
     .mla-pill.mla-pill-warn { background: var(--bad); color: #4a1414; }
     .mla-player-card { border: 2px solid var(--border); border-radius: 14px; padding: 8px 10px; margin-bottom: 8px; background: var(--panel); }
     .mla-player-card.mla-current { border-color: var(--accent-strong); box-shadow: 0 0 0 3px #ffd9b8; }
+    /* 응급실의 왕: 왕관 보유자는 은은한 금빛 테두리로 항상 눈에 띄게 */
+    .mla-player-card.mla-crowned { border-color: #e8b93c; box-shadow: 0 0 0 2px #fbe6a3; }
+    .mla-crown-badge { display: inline-block; animation: mla-crown-bob 1.6s ease-in-out infinite; }
+    @keyframes mla-crown-bob { 0%, 100% { transform: rotate(0deg) translateY(0); } 50% { transform: rotate(-8deg) translateY(-2px); } }
+
+    /* 게임 승리 화면: 금빛 그라데이션이 은은하게 흐르는 배경 + 우승자 카드 글로우 */
+    .mla-victory-panel {
+      background: linear-gradient(120deg, #fff3e6, #ffe3a8, #fff3e6); background-size: 200% 200%;
+      border-color: #e8b93c; animation: mla-victory-shine 2.6s ease-in-out infinite;
+    }
+    @keyframes mla-victory-shine { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+    .mla-player-card.mla-winner-card { border-color: #e8b93c; animation: mla-winner-glow 1.6s ease-in-out infinite; }
+    @keyframes mla-winner-glow {
+      0%, 100% { box-shadow: 0 0 0 3px #fbe6a3; }
+      50% { box-shadow: 0 0 0 6px #fdd873; }
+    }
+    .mla-trophy-bounce { display: inline-block; animation: mla-trophy-bounce-kf 1s ease-in-out infinite; }
+    @keyframes mla-trophy-bounce-kf { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-3px) rotate(-8deg); } }
     .mla-player-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 4px; }
     .mla-choice-btn {
       display: block; width: 100%; text-align: left; padding: 10px 12px; margin: 6px 0; border-radius: 10px;

@@ -30,7 +30,11 @@ export function computeScore(state, player) {
   }
   let penalty = 0;
   if (variant && variant.missingSuitPenalty) penalty = variant.missingSuitPenalty(player, null);
-  return base + penalty + (player.bonusScore || 0);
+
+  // 응급실의 왕: 왕관을 쥔 플레이어에게 +10점 (게임 중 실시간 점수 표시에도 즉시 반영).
+  const crownBonus = state.mode.kingOfEr && state.crownHolderId === player.playerId ? 10 : 0;
+
+  return base + penalty + (player.bonusScore || 0) + crownBonus;
 }
 
 export function finishGame(state, forcedWinnerIds) {

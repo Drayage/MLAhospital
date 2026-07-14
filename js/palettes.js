@@ -14,19 +14,36 @@ export const HOSPITAL = {
       { t: "tone", wave: "triangle", freq: 1174, dur: 0.16, gain: 0.08, attack: 0.09, lp: 3600 },
     ],
 
-    // 대소동(오류): 놀란 듯 둔탁하게 가라앉는 두 음 — 날카롭지 않게 로우패스를 낮게
+    // 대소동(오류): 둔탁한 충격 노이즈 + 놀라서 가라앉는 세 음 — 날카롭지 않게
+    // 로우패스를 낮게 유지하면서도, 낮은 여운 톤을 하나 더해 무게감을 키웠다.
     error: [
-      { t: "tone", wave: "triangle", freq: 300, freqEnd: 210, dur: 0.16, gain: 0.32, attack: 0.01, lp: 1100 },
-      { t: "tone", wave: "sine", freq: 220, freqEnd: 140, dur: 0.26, gain: 0.3, attack: 0.05, lp: 900 },
+      { t: "noise", dur: 0.1, gain: 0.2, lp: 650 },
+      { t: "tone", wave: "triangle", freq: 320, freqEnd: 200, dur: 0.18, gain: 0.36, attack: 0.008, lp: 1100 },
+      { t: "tone", wave: "sine", freq: 220, freqEnd: 130, dur: 0.3, gain: 0.34, attack: 0.04, lp: 900 },
+      { t: "tone", wave: "sine", freq: 110, freqEnd: 78, dur: 0.42, gain: 0.2, attack: 0.09, lp: 500 },
     ],
 
-    // 승리: 밝고 따뜻한 4음 아르페지오 + 마지막 종소리 잔향
+    // 왕관 획득(응급실의 왕): 짧은 팀파니 노이즈 + 상승하는 3화음 + 반짝이는 배음 — 짧고
+    // 굵은 팡파르 느낌.
+    crown: [
+      { t: "noise", dur: 0.08, gain: 0.16, lp: 1200 },
+      { t: "tone", wave: "triangle", freq: 392, dur: 0.14, gain: 0.34, attack: 0.006, lp: 3000 },
+      { t: "tone", wave: "triangle", freq: 494, dur: 0.14, gain: 0.34, attack: 0.1, lp: 3000 },
+      { t: "tone", wave: "triangle", freq: 587, dur: 0.18, gain: 0.36, attack: 0.2, lp: 3200 },
+      { t: "tone", wave: "sine", freq: 784, dur: 0.55, gain: 0.32, attack: 0.32, lp: 3800 },
+      { t: "tone", wave: "sine", freq: 1175, dur: 0.48, gain: 0.16, attack: 0.35, lp: 4200 },
+      { t: "tone", wave: "sine", freq: 1568, dur: 0.42, gain: 0.1, attack: 0.38, lp: 4500 },
+    ],
+
+    // 승리: 밝고 따뜻한 5음 아르페지오 + 종소리 잔향 + 반짝이는 배음으로 더 풍성하게
     win: [
       { t: "tone", wave: "triangle", freq: 523, dur: 0.16, gain: 0.32, attack: 0.01, lp: 2800 },
       { t: "tone", wave: "triangle", freq: 659, dur: 0.16, gain: 0.32, attack: 0.14, lp: 2800 },
       { t: "tone", wave: "triangle", freq: 784, dur: 0.2, gain: 0.32, attack: 0.28, lp: 2800 },
-      { t: "tone", wave: "sine", freq: 1047, dur: 0.6, gain: 0.28, attack: 0.44, lp: 3200 },
-      { t: "tone", wave: "sine", freq: 1568, dur: 0.5, gain: 0.12, attack: 0.46, lp: 3600 },
+      { t: "tone", wave: "triangle", freq: 988, dur: 0.2, gain: 0.3, attack: 0.42, lp: 3000 },
+      { t: "tone", wave: "sine", freq: 1047, dur: 0.7, gain: 0.3, attack: 0.56, lp: 3200 },
+      { t: "tone", wave: "sine", freq: 1568, dur: 0.6, gain: 0.14, attack: 0.58, lp: 3600 },
+      { t: "tone", wave: "sine", freq: 2093, dur: 0.5, gain: 0.08, attack: 0.6, lp: 4000 },
     ],
   },
   bgm: {

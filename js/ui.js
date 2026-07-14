@@ -191,6 +191,9 @@ function onSubmit(e) {
     aiFlags,
     useTraits: data.get("useTraits") === "on",
     variantMode: data.get("variantMode") || "none",
+    deckMultiplier: data.get("partyMode") === "on" ? 2 : 1,
+    kingOfEr: data.get("kingOfEr") === "on",
+    noAbilities: data.get("noAbilities") === "on",
   });
   pendingBust = null;
   surrendered = false;
@@ -273,6 +276,7 @@ function commitAction(engineAction) {
   const newEntries = game.actionLog.slice(logLenBefore);
   const bustEntry = newEntries.find((entry) => entry.type === "bust");
   const bankEntry = newEntries.find((entry) => entry.type === "bank");
+  const crownEntry = newEntries.find((entry) => entry.type === "crown_awarded");
   const enteredCardIds = newEntries.filter((entry) => entry.type === "card_entered").map((entry) => entry.cardId);
   // 대소동을 일으킨 카드 자체는 "card_entered" 로그 없이 곧장 대소동으로 처리되므로
   // (handleEnterCard가 중복을 감지하면 로그를 남기지 않고 바로 resolveBust) 따로 붙여준다 —
@@ -286,11 +290,11 @@ function commitAction(engineAction) {
   // 대소동 리빌)로 점프해서 "카드 두 장이 동시에 나타난 것"처럼 보였다. 한 장씩 순서대로
   // 보여준 뒤에 최종 상태로 넘어가게 한다.
   if (enteredCardIds.length > 1) {
-    animateChainedEntries(playAreaBefore, enteredCardIds, engineAction, bustEntry, bankEntry);
+    animateChainedEntries(playAreaBefore, enteredCardIds, engineAction, bustEntry, bankEntry, crownEntry);
     return;
   }
 
-  feedbackFor(engineAction, bustEntry, bankEntry);
+  feedbackFor(engineAction, bustEntry, bankEntry, crownEntry);
   if (bustEntry) pendingBust = bustEntry;
   persistAndRender();
 }
@@ -299,7 +303,7 @@ function commitAction(engineAction) {
 // (이번 행동 전부터 있던 카드 + 새로 들어온 카드를) 한 장씩 자라나는 임시 스냅샷으로
 // 순서대로 보여준다. 마지막 스텝을 보여준 뒤에야 진짜 persistAndRender()로 넘어가
 // (대소동이면 그때 리빌 화면을 띄운다).
-function animateChainedEntries(playAreaBefore, enteredCardIds, engineAction, bustEntry, bankEntry) {
+function animateChainedEntries(playAreaBefore, enteredCardIds, engineAction, bustEntry, bankEntry, crownEntry) {
   animating = true;
   let shown = 1;
   const step = () => {
@@ -322,7 +326,7 @@ function animateChainedEntries(playAreaBefore, enteredCardIds, engineAction, bus
     lastFlippedCardId = enteredCardIds[enteredCardIds.length - 1];
     chainTimer = setTimeout(() => {
       animating = false;
-      feedbackFor(engineAction, bustEntry, bankEntry);
+      feedbackFor(engineAction, bustEntry, bankEntry, crownEntry);
       if (bustEntry) pendingBust = bustEntry;
       persistAndRender();
     }, 480);
@@ -346,8 +350,15 @@ function doSurrender() {
   persistAndRender();
 }
 
-function feedbackFor(action, bustEntry, bankEntry) {
-  if (bustEntry) {
+function feedbackFor(action, bustEntry, bankEntry, crownEntry) {
+  // 왕관 획득은 극적인 순간이므로, 대소동/뱅킹과 겹치더라도(거북이 보호 카드만으로
+  // 10종을 채운 채 대소동이 나는 등) 팡파르가 우선한다 — 화면(대소동 리빌 등)은
+  // 그대로 진행되고 소리와 토스트만 왕관 쪽으로 바뀐다.
+  if (crownEntry) {
+    playSfx(HOSPITAL, "crown");
+    const holder = game.players.find((p) => p.playerId === crownEntry.playerId);
+    showToast(`👑 ${holder ? holder.displayName : ""}님이 응급실의 왕관을 차지했어요! (+10점)`, "crown");
+  } else if (bustEntry) {
     // 진료 줄 안에서 바로 보여주므로(흔들림+배지) 별도 토스트는 생략한다.
     playSfx(HOSPITAL, "error");
   } else if (bankEntry) {
@@ -395,14 +406,17 @@ function scheduleAiIfNeeded() {
   }, AI_THINK_DELAY_MS);
 }
 
-function showToast(msg) {
+function showToast(msg, variant) {
   const el = document.getElementById("mla-toast");
   if (!el) return;
-  el.classList.remove("mla-toast-info");
+  el.classList.remove("mla-toast-info", "mla-toast-crown");
+  if (variant) el.classList.add(`mla-toast-${variant}`);
   el.textContent = msg;
   el.classList.add("mla-show");
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => el.classList.remove("mla-show"), 1600);
+  // 왕관 획득처럼 특별한 순간은 조금 더 오래 보여준다.
+  const duration = variant === "crown" ? 2600 : 1600;
+  showToast._t = setTimeout(() => el.classList.remove("mla-show"), duration);
 }
 
 // suit 능력 설명 + (입원실 카드라면) 그 스택에 실제로 쌓여있는 숫자들도 함께 보여준다.
@@ -423,6 +437,7 @@ function showAbilityInfo(suit, playerId) {
     }
   }
 
+  el.classList.remove("mla-toast-crown");
   el.textContent = `${animal.icon} ${animal.name} — ${animal.description}${stackNote}`;
   el.classList.add("mla-show", "mla-toast-info");
   clearTimeout(showToast._t);

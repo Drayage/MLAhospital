@@ -11,6 +11,8 @@ export function createGame(options) {
     useTraits = false,
     variantMode = "none", // "none" | "random" | "manual"
     deckMultiplier = 1,
+    kingOfEr = false, // 응급실의 왕 — 한 턴에 10종류 모두 입원시키면 왕관(+10점)
+    noAbilities = false, // 심심한 모드 — 동물 능력/볼빵빵 콤보 전부 비활성
     seed = Date.now() & 0xffffffff,
   } = options;
 
@@ -21,7 +23,7 @@ export function createGame(options) {
   const state = {
     gameId: "game-" + Math.floor(Math.random() * 1e9),
     phase: "setup",
-    mode: { useTraits, variantMode, deckMultiplier },
+    mode: { useTraits, variantMode, deckMultiplier, kingOfEr, noAbilities },
     players: playerNames.map((name, i) => ({
       playerId: "p" + i,
       displayName: name,
@@ -41,9 +43,10 @@ export function createGame(options) {
     protectedCardIds: [],
     requiredExtraDraws: 0,
     activeVariantId: null,
+    crownHolderId: null, // 응급실의 왕 — 왕관을 가진 플레이어 (1개뿐, 가장 최근 성공자)
     pendingDecision: null,
     effectQueue: [],
-    turnFlags: { monkeyRecalledCardIds: [], owlDrawnCardIds: [], safeHarborRemaining: 0 },
+    turnFlags: { monkeyRecalledCardIds: [], owlDrawnCardIds: [], safeHarborRemaining: 0, hospitalizedSuitsThisTurn: [] },
     traitOffers: null,
     actionLog: [],
     winnerIds: [],
