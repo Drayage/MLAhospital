@@ -23,8 +23,10 @@ let game = null;
 let pendingBust = null; // 대소동이 나면 진료 줄 자리에서 어떤 카드 때문인지 잠깐 보여준다
 let aiTimer = null;
 let bustTimer = null;
+let chainTimer = null;
 let lastFlippedCardId = null; // 이미 뒤집기 연출을 보여준 카드 — 재렌더 때 또 뒤집지 않으려고 기록
 let surrendered = false; // 항복으로 게임이 끝났는지 (게임오버 화면 문구 구분용)
+let animating = false; // 카드 연쇄 진입을 한 장씩 보여주는 중 — 이 사이엔 새 행동을 막는다
 
 const AI_THINK_DELAY_MS = 1300; // 사람처럼 살짝 고민하는 느낌
 const BUST_AUTO_DISMISS_MS = 2600;
@@ -220,6 +222,8 @@ function handleActionClick(btn) {
   if (action === "new-game") {
     clearTimeout(aiTimer);
     clearTimeout(bustTimer);
+    clearTimeout(chainTimer);
+    animating = false;
     stopBgm();
     game = null;
     pendingBust = null;
@@ -228,6 +232,7 @@ function handleActionClick(btn) {
     return;
   }
   if (action === "surrender") {
+    if (animating) return; // 카드 연쇄 진입 연출 중엔 새 행동을 막는다
     document.getElementById("surrender-modal").showModal();
     return;
   }
@@ -238,7 +243,7 @@ function handleActionClick(btn) {
   }
   if (btn.closest("#mla-setup-form")) return; // submit이 처리
 
-  if (!game || pendingBust) return;
+  if (!game || pendingBust || animating) return;
 
   let engineAction = null;
   if (action === "draw") engineAction = { type: "DRAW" };
@@ -255,6 +260,7 @@ function handleActionClick(btn) {
 
 // 사람이 누른 행동이든 AI가 고른 행동이든 같은 경로로 처리한다.
 function commitAction(engineAction) {
+  const playAreaBefore = game.playArea.slice(); // 이번 행동 전에 이미 진료 줄에 있던 카드들
   const logLenBefore = game.actionLog.length;
   try {
     applyAction(game, engineAction);
@@ -267,9 +273,61 @@ function commitAction(engineAction) {
   const newEntries = game.actionLog.slice(logLenBefore);
   const bustEntry = newEntries.find((entry) => entry.type === "bust");
   const bankEntry = newEntries.find((entry) => entry.type === "bank");
+  const enteredCardIds = newEntries.filter((entry) => entry.type === "card_entered").map((entry) => entry.cardId);
+  // 대소동을 일으킨 카드 자체는 "card_entered" 로그 없이 곧장 대소동으로 처리되므로
+  // (handleEnterCard가 중복을 감지하면 로그를 남기지 않고 바로 resolveBust) 따로 붙여준다 —
+  // 안 그러면 "고양이 뽑고 훔쳐온 카드가 바로 겹쳐서 터지는" 경우, 카드가 도합 2장 들어왔는데도
+  // enteredCardIds 길이가 1로 보여서 아래 연쇄 연출이 건너뛰어진다.
+  if (bustEntry) enteredCardIds.push(bustEntry.triggeringCardId);
+
+  // 원숭이/고양이 능력이 선택지가 하나뿐이면 자동 실행되는데(불필요한 탭 제거), 그 결과로
+  // 카드가 하나 더 진료 줄에 밀려 들어오는 경우가 있다 — 특히 그게 대소동으로 이어지면,
+  // 엔진은 이 모든 걸 한 번의 행동으로 동기 처리하므로 화면도 한 번에 최종 결과(카드 2장 +
+  // 대소동 리빌)로 점프해서 "카드 두 장이 동시에 나타난 것"처럼 보였다. 한 장씩 순서대로
+  // 보여준 뒤에 최종 상태로 넘어가게 한다.
+  if (enteredCardIds.length > 1) {
+    animateChainedEntries(playAreaBefore, enteredCardIds, engineAction, bustEntry, bankEntry);
+    return;
+  }
+
   feedbackFor(engineAction, bustEntry, bankEntry);
   if (bustEntry) pendingBust = bustEntry;
   persistAndRender();
+}
+
+// 실제 game 객체는 이미 최종 상태로 바뀌어 있으므로 건드리지 않고, 화면에만 진료 줄이
+// (이번 행동 전부터 있던 카드 + 새로 들어온 카드를) 한 장씩 자라나는 임시 스냅샷으로
+// 순서대로 보여준다. 마지막 스텝을 보여준 뒤에야 진짜 persistAndRender()로 넘어가
+// (대소동이면 그때 리빌 화면을 띄운다).
+function animateChainedEntries(playAreaBefore, enteredCardIds, engineAction, bustEntry, bankEntry) {
+  animating = true;
+  let shown = 1;
+  const step = () => {
+    const partial = [...playAreaBefore, ...enteredCardIds.slice(0, shown)];
+    const snapshot = {
+      ...game,
+      playArea: partial,
+      pendingDecision: null,
+      protectedCardIds: game.protectedCardIds.filter((cid) => partial.includes(cid)),
+    };
+    gameArea().innerHTML = gameBoardHtml(snapshot, { aiThinking: false });
+    playSfx(HOSPITAL, "tap");
+    if (shown < enteredCardIds.length) {
+      shown++;
+      chainTimer = setTimeout(step, 480);
+      return;
+    }
+    // 마지막 카드까지 다 보여줬다 — 진짜 render()가 이 카드를 "또" 뒤집지 않도록
+    // computeFlipTarget()이 이미 보여준 것으로 기억하게 해준다.
+    lastFlippedCardId = enteredCardIds[enteredCardIds.length - 1];
+    chainTimer = setTimeout(() => {
+      animating = false;
+      feedbackFor(engineAction, bustEntry, bankEntry);
+      if (bustEntry) pendingBust = bustEntry;
+      persistAndRender();
+    }, 480);
+  };
+  step();
 }
 
 // 항복: 진행 중이던 진료 줄(아직 확보 안 한 카드)은 그대로 날리고, 지금까지 입원시킨
@@ -279,6 +337,8 @@ function doSurrender() {
   if (!game || game.phase === "game_over") return;
   clearTimeout(aiTimer);
   clearTimeout(bustTimer);
+  clearTimeout(chainTimer);
+  animating = false;
   pendingBust = null;
   surrendered = true;
   finishGame(game);
