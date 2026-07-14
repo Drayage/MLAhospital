@@ -19,8 +19,9 @@
 - `js/engine/scoring.js` — 점수 계산/승자 결정 (동점 처리 포함)
 - `js/engine/actions.js` — 공개 행동 API: `getLegalActions(state)` / `applyAction(state, action)`
 - `js/engine.js` — 위 엔진 모듈들의 배럴 (UI·시뮬레이터가 쓰는 단일 진입점)
-- `js/ui.js` — 컨트롤러 (이벤트 위임, 엔진 호출, 저장/사운드 트리거) — 규칙 로직 없음
-- `js/ui/render.js` — 순수 렌더 함수 (상태 → HTML 문자열)
+- `js/ui.js` — 컨트롤러 (이벤트 위임, 엔진 호출, 저장/사운드 트리거, AI 턴 자동 진행) — 규칙 로직 없음
+- `js/ui/render.js` — 순수 렌더 함수 (상태 → HTML 문자열), 대소동 리빌 화면·카드 플립 포함
+- `js/ai.js` — AI 상대 정책 (`getLegalActions`가 만든 선택지 중에서만 고름, 규칙 로직 없음)
 - `js/palettes.js` — 사운드 팔레트 (`HOSPITAL`: 말랑 파스텔 + 병원 종소리)
 - `js/storage.js` — 새로고침 복원
 - `sw.js` — PWA 캐시 (network-first + CACHE_VERSION + controllerchange 1회 reload)
@@ -59,6 +60,12 @@
   통과한다 — `Math.random()` 직접 호출 금지. 이래야 상태가 완전히 직렬화 가능하고
   (미래 온라인 동기화 대비) 시뮬/테스트가 재현 가능하다.
 - 엔진(js/engine*, js/data*)은 DOM을 전혀 모른다. `js/ui.js`만 DOM을 만진다.
+- 대소동은 `applyAction` 안에서 `actionLog`에 `type:"bust"` 항목으로 즉시 기록된다. UI는 이 로그
+  항목으로 "화면을 멈추고" 어떤 카드 때문에 터졌는지 보여준 뒤(`bustRevealHtml`, 탭 또는 자동
+  타이머로 진행) 다음 상태를 렌더한다 — 엔진 자체는 절대 멈추지 않고 동기적으로 끝까지 처리한다.
+- AI 플레이어는 `js/ai.js`의 `chooseAiAction(state)`가 `getLegalActions`의 결과 중에서만 고르고,
+  `js/ui.js`가 사람의 클릭과 동일한 `applyAction` 경로(`commitAction`)로 적용한다. 새 특기/변형규칙을
+  추가해도 AI가 자동으로 그 규칙이 만든 선택지를 인식한다(엔진이 만든 옵션만 보므로).
 
 ## 규칙 (스타터 킷 공통)
 

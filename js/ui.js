@@ -4,6 +4,7 @@ import { getLegalActions, applyAction } from "./engine/actions.js";
 import { saveGame, loadGame, clearGame } from "./storage.js";
 import { playSfx, startBgm } from "./audio.js";
 import { HOSPITAL } from "./palettes.js";
+import { chooseAiAction } from "./ai.js";
 import {
   setupScreenHtml,
   nameFieldsHtml,
@@ -12,10 +13,17 @@ import {
   veilHtml,
   gameBoardHtml,
   gameOverHtml,
+  bustRevealHtml,
 } from "./ui/render.js";
 
 let game = null;
 let revealedGateKey = null;
+let pendingBust = null; // 대소동이 나면 화면을 멈추고 어떤 카드 때문인지 보여준다
+let aiTimer = null;
+let bustTimer = null;
+
+const AI_THINK_DELAY_MS = 650;
+const BUST_AUTO_DISMISS_MS = 2400;
 
 const gameArea = () => document.getElementById("game-area");
 const actionBar = () => document.getElementById("action-bar");
@@ -32,8 +40,29 @@ export function startApp() {
   render();
 }
 
+// 현재 결정을 내려야 하는 플레이어 ID (변형규칙 선택처럼 특정 플레이어에게 속하지 않으면 null)
+function currentActorId() {
+  if (!game) return null;
+  if (game.phase === "trait_selection" && game.pendingDecision) return game.pendingDecision.playerId;
+  if (game.phase === "variant_selection") return null;
+  if (game.pendingDecision) return game.pendingDecision.playerId;
+  if (game.phase === "turn_start" || game.phase === "waiting_for_choice") {
+    return game.players[game.currentPlayerIndex].playerId;
+  }
+  return null;
+}
+
+function currentActor() {
+  const id = currentActorId();
+  return id ? game.players.find((p) => p.playerId === id) : null;
+}
+
+// AI 차례에는 다른 사람에게 숨길 정보가 없으므로(감출 대상이 없음) 가림막을 생략한다.
 function currentGateKey() {
   if (!game) return null;
+  const actor = currentActor();
+  if (actor && actor.isAI) return null;
+
   if (game.phase === "trait_selection" && game.pendingDecision) {
     return "trait:" + game.pendingDecision.playerId;
   }
@@ -48,6 +77,13 @@ function render() {
     gameArea().innerHTML = setupScreenHtml();
     regenNameFields();
     renderActionBar();
+    return;
+  }
+
+  if (pendingBust) {
+    gameArea().innerHTML = bustRevealHtml(game, pendingBust);
+    renderActionBar();
+    scheduleBustAutoDismiss();
     return;
   }
 
@@ -70,6 +106,7 @@ function render() {
     gameArea().innerHTML = gameBoardHtml(game);
   }
   renderActionBar();
+  scheduleAiIfNeeded();
 }
 
 function renderActionBar() {
@@ -77,8 +114,19 @@ function renderActionBar() {
   const rulesBtn = document.getElementById("rules-btn");
   bar.querySelectorAll("[data-mla-main]").forEach((el) => el.remove());
 
-  if (!game || game.phase === "game_over" || game.phase === "trait_selection" || game.phase === "variant_selection") return;
+  if (!game || pendingBust) return;
+  if (game.phase === "game_over" || game.phase === "trait_selection" || game.phase === "variant_selection") return;
   if (currentGateKey() && revealedGateKey !== currentGateKey()) return;
+
+  const actor = currentActor();
+  if (actor && actor.isAI) {
+    const thinking = document.createElement("span");
+    thinking.className = "mla-pill mla-pill-soft";
+    thinking.setAttribute("data-mla-main", "1");
+    thinking.textContent = `🤖 ${actor.displayName}님이 진료 중...`;
+    bar.insertBefore(thinking, rulesBtn);
+    return;
+  }
 
   const legal = getLegalActions(game);
   const canDraw = legal.some((a) => a.type === "DRAW");
@@ -116,14 +164,19 @@ function onSubmit(e) {
   if (!form) return;
   e.preventDefault();
   const data = new FormData(form);
-  const playerNames = data.getAll("playerName").map((s) => s.trim() || "플레이어").slice(0, Number(data.get("playerCount")));
+  const playerCount = Number(data.get("playerCount"));
+  const playerNames = data.getAll("playerName").map((s) => s.trim() || "플레이어").slice(0, playerCount);
+  const aiIndexes = new Set(data.getAll("playerIsAI").map(Number));
+  const aiFlags = playerNames.map((_, i) => aiIndexes.has(i));
   startBgm(HOSPITAL, "main");
   game = createGame({
     playerNames,
+    aiFlags,
     useTraits: data.get("useTraits") === "on",
     variantMode: data.get("variantMode") || "none",
   });
   revealedGateKey = null;
+  pendingBust = null;
   persistAndRender();
 }
 
@@ -138,16 +191,23 @@ function onClick(e) {
     render();
     return;
   }
+  if (action === "dismiss-bust") {
+    dismissBust();
+    return;
+  }
   if (action === "new-game") {
+    clearTimeout(aiTimer);
+    clearTimeout(bustTimer);
     game = null;
     revealedGateKey = null;
+    pendingBust = null;
     clearGame();
     render();
     return;
   }
   if (btn.closest("#mla-setup-form")) return; // submit이 처리
 
-  if (!game) return;
+  if (!game || pendingBust) return;
 
   let engineAction = null;
   if (action === "draw") engineAction = { type: "DRAW" };
@@ -158,8 +218,12 @@ function onClick(e) {
   else if (action === "decide") engineAction = { type: "DECIDE", value: JSON.parse(btn.getAttribute("data-value")) };
   if (!engineAction) return;
 
-  const wasPhase = game.phase;
-  const prevPlayArea = game.playArea.length;
+  commitAction(engineAction);
+}
+
+// 사람이 누른 행동이든 AI가 고른 행동이든 같은 경로로 처리한다.
+function commitAction(engineAction) {
+  const logLenBefore = game.actionLog.length;
   try {
     applyAction(game, engineAction);
   } catch (err) {
@@ -168,17 +232,19 @@ function onClick(e) {
     return;
   }
 
-  feedbackFor(engineAction, wasPhase, prevPlayArea);
+  const newEntries = game.actionLog.slice(logLenBefore);
+  const bustEntry = newEntries.find((entry) => entry.type === "bust");
+  feedbackFor(engineAction, bustEntry);
   revealedGateKey = null;
+  if (bustEntry) pendingBust = bustEntry;
   persistAndRender();
 }
 
-function feedbackFor(action, wasPhase, prevPlayArea) {
-  const lastLog = game.actionLog[game.actionLog.length - 1];
-  if (lastLog && lastLog.type === "bust") {
+function feedbackFor(action, bustEntry) {
+  if (bustEntry) {
+    // 전용 대소동 화면(bustRevealHtml)이 이미 상세히 보여주므로 토스트는 생략한다.
     playSfx(HOSPITAL, "error");
-    showToast("😱 진료실 대소동!");
-  } else if (action.type === "bank") {
+  } else if (action.type === "BANK") {
     playSfx(HOSPITAL, "confirm");
     showToast("✅ 진료를 마쳤어요");
   } else if (game.phase === "game_over") {
@@ -186,6 +252,30 @@ function feedbackFor(action, wasPhase, prevPlayArea) {
   } else {
     playSfx(HOSPITAL, "tap");
   }
+}
+
+function scheduleBustAutoDismiss() {
+  clearTimeout(bustTimer);
+  bustTimer = setTimeout(dismissBust, BUST_AUTO_DISMISS_MS);
+}
+
+function dismissBust() {
+  clearTimeout(bustTimer);
+  if (!pendingBust) return;
+  pendingBust = null;
+  render();
+}
+
+// 현재 결정권자가 AI면 잠시 후 스스로 행동을 골라 진행한다 (사람처럼 약간의 텀을 둔다).
+function scheduleAiIfNeeded() {
+  clearTimeout(aiTimer);
+  if (!game || pendingBust || game.phase === "game_over") return;
+  const actor = currentActor();
+  if (!actor || !actor.isAI) return;
+  aiTimer = setTimeout(() => {
+    const action = chooseAiAction(game);
+    if (action) commitAction(action);
+  }, AI_THINK_DELAY_MS);
 }
 
 function showToast(msg) {

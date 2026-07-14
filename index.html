@@ -73,6 +73,25 @@
       position: absolute; top: -6px; right: -6px; background: var(--accent-strong); color: #fff;
       border-radius: 999px; font-size: 10px; padding: 1px 5px; font-weight: 700;
     }
+    /* 카드 뒤집기 연출: 뒷면으로 잠깐 보였다가 실제 얼굴로 뒤집힌다 */
+    .mla-flip-outer { width: 56px; height: 76px; margin: 3px; display: inline-block; perspective: 700px; }
+    .mla-flip-inner {
+      position: relative; width: 100%; height: 100%; transform-style: preserve-3d;
+      animation: mla-cardflip 0.5s cubic-bezier(.32,.08,.24,1) 0.18s both;
+    }
+    .mla-flip-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 10px; }
+    .mla-flip-back {
+      display: flex; align-items: center; justify-content: center; font-size: 20px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      border: 2px solid var(--accent-strong); box-shadow: var(--shadow);
+    }
+    .mla-flip-face.mla-flip-front { transform: rotateY(180deg); margin: 0; }
+    @keyframes mla-cardflip { from { transform: rotateY(0deg); } to { transform: rotateY(180deg); } }
+    .mla-bust-panel { border-color: var(--bad); background: #fff0ef; }
+    .mla-ai-toggle {
+      display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 13px;
+      color: var(--ink-soft); flex: 0 0 auto;
+    }
     .mla-row { display: flex; flex-wrap: wrap; align-items: flex-start; }
     .mla-panel { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; }
     .mla-panel h3 { font-size: 13px; color: var(--ink-soft); letter-spacing: 0.02em; }

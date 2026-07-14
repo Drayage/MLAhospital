@@ -10,6 +10,7 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// opts.flip: 뒷면 상태로 나타났다가 실제 얼굴로 뒤집히는 연출 (카드 공개 순간의 긴장감용).
 export function cardHtml(cardId, opts = {}) {
   const card = getCard(cardId);
   const animal = ANIMALS[card.suit];
@@ -17,11 +18,17 @@ export function cardHtml(cardId, opts = {}) {
   if (opts.protected) cls.push("mla-protected");
   if (opts.ghost) cls.push("mla-ghost");
   const badge = opts.badge ? `<span class="mla-badge">${esc(opts.badge)}</span>` : "";
-  return `<div class="${cls.join(" ")}" title="${esc(animal.name)} ${card.value}">
-    ${badge}
-    <div class="mla-icon">${animal.icon}</div>
-    <div class="mla-value">${card.value}</div>
-  </div>`;
+  const faceInner = `${badge}<div class="mla-icon">${animal.icon}</div><div class="mla-value">${card.value}</div>`;
+
+  if (opts.flip) {
+    return `<div class="mla-flip-outer">
+      <div class="mla-flip-inner">
+        <div class="mla-flip-face mla-flip-back">🐾</div>
+        <div class="mla-flip-face mla-flip-front ${cls.join(" ")}" title="${esc(animal.name)} ${card.value}">${faceInner}</div>
+      </div>
+    </div>`;
+  }
+  return `<div class="${cls.join(" ")}" title="${esc(animal.name)} ${card.value}">${faceInner}</div>`;
 }
 
 function emptySuitSlotHtml(suit) {
@@ -48,7 +55,7 @@ export function playerPanelHtml(state, player) {
   const traitName = player.traitId ? TRAITS[player.traitId].name : null;
   return `<div class="mla-player-card ${isTurn ? "mla-current" : ""}" data-player-id="${player.playerId}">
     <div class="mla-player-head">
-      <span>${isTurn ? "▶ " : ""}${esc(player.displayName)}</span>
+      <span>${isTurn ? "▶ " : ""}${player.isAI ? "🤖 " : ""}${esc(player.displayName)}</span>
       <span class="mla-pill mla-pill-soft">점수 ${score}</span>
     </div>
     ${traitName ? `<div class="mla-muted">특기: ${esc(traitName)}</div>` : ""}
@@ -93,7 +100,12 @@ export function nameFieldsHtml(count) {
   for (let i = 0; i < count; i++) {
     html += `<div class="mla-setup-field">
       <label>플레이어 ${i + 1} 이름</label>
-      <input type="text" name="playerName" maxlength="10" value="${esc(defaults[i])}" />
+      <div class="mla-row" style="align-items:center; flex-wrap:nowrap; gap:8px;">
+        <input type="text" name="playerName" maxlength="10" value="${esc(defaults[i])}" style="flex:1" />
+        <label class="mla-ai-toggle">
+          <input type="checkbox" name="playerIsAI" value="${i}" /> 🤖 AI
+        </label>
+      </div>
     </div>`;
   }
   return html;
@@ -169,7 +181,10 @@ function playAreaHtml(state) {
     return `<div class="mla-panel"><h3>현재 진료 줄</h3><p class="mla-muted">아직 접수한 환자가 없어요.</p></div>`;
   }
   const protectedSet = new Set(state.protectedCardIds);
-  const cards = state.playArea.map((cid) => cardHtml(cid, { protected: protectedSet.has(cid) })).join("");
+  const lastIdx = state.playArea.length - 1;
+  const cards = state.playArea
+    .map((cid, i) => cardHtml(cid, { protected: protectedSet.has(cid), flip: i === lastIdx }))
+    .join("");
   return `<div class="mla-panel">
     <h3>현재 진료 줄</h3>
     <div class="mla-row">${cards}</div>
@@ -209,11 +224,11 @@ function decisionHtml(state) {
     case "mole_choose_card":
       return decisionWrap(
         "🦔 두더지 능력 — 귀가 더미에서 접수할 카드를 고르세요",
-        `<div class="mla-row">${d.options.map((cid) => cardHtml(cid)).join("")}</div>` +
+        `<div class="mla-row">${d.options.map((cid) => cardHtml(cid, { flip: true })).join("")}</div>` +
           d.options.map((cid) => `<button class="mla-choice-btn" data-action="decide" data-value='${JSON.stringify(cid)}'>${cardLabel(cid)} 접수하기</button>`).join("")
       );
     case "owl_choose": {
-      const preview = d.previewCardIds.map((cid) => cardHtml(cid)).join("");
+      const preview = d.previewCardIds.map((cid) => cardHtml(cid, { flip: true })).join("");
       const takeButtons = d.previewCardIds
         .map((cid) => `<button class="mla-choice-btn" data-action="decide" data-value='${JSON.stringify({ action: "take", cardId: cid })}'>${cardLabel(cid)} 접수하기</button>`)
         .join("");
@@ -234,9 +249,38 @@ function decisionWrap(title, body) {
   </div>`;
 }
 
-function cardLabel(cardId) {
+export function cardLabel(cardId) {
   const card = getCard(cardId);
   return `${ANIMALS[card.suit].icon} ${esc(ANIMALS[card.suit].name)} ${card.value}`;
+}
+
+// 대소동 발생 시 화면을 멈추고 어떤 카드 때문에 터졌는지 보여주는 전용 화면.
+export function bustRevealHtml(state, bustEntry) {
+  const player = state.players.find((p) => p.playerId === bustEntry.playerId);
+  const protectedIds = bustEntry.protectedCardIds || [];
+  const lostIds = bustEntry.lostCardIds || [];
+  const orderedIds = [...protectedIds, ...lostIds];
+  const cards = orderedIds
+    .map((cid) =>
+      cardHtml(cid, {
+        protected: protectedIds.includes(cid),
+        badge: cid === bustEntry.triggeringCardId ? "!" : "",
+      })
+    )
+    .join("");
+  return `<div class="mla-panel mla-center mla-bust-panel">
+      <h2>😱 진료실 대소동!</h2>
+      <p>${player.isAI ? "🤖 " : ""}${esc(player.displayName)}님의 진료 줄에 <b>${cardLabel(bustEntry.triggeringCardId)}</b>가 겹쳐서 대소동이 났어요!</p>
+    </div>
+    <div class="mla-panel">
+      <div class="mla-row">${cards}</div>
+      ${
+        protectedIds.length
+          ? `<p class="mla-muted">🛡️ 초록 테두리 = 거북이 등으로 보호되어 입원 · 나머지는 귀가 더미로</p>`
+          : `<p class="mla-muted">이번엔 보호된 카드가 없어서 전부 귀가 더미로 갔어요.</p>`
+      }
+    </div>
+    <button class="mla-choice-btn" data-action="dismiss-bust" style="text-align:center;font-weight:700;">계속하기</button>`;
 }
 
 export function gameBoardHtml(state) {

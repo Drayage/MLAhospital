@@ -7,6 +7,7 @@ import { shuffle, randomInt } from "./rng.js";
 export function createGame(options) {
   const {
     playerNames,
+    aiFlags = [],
     useTraits = false,
     variantMode = "none", // "none" | "random" | "manual"
     deckMultiplier = 1,
@@ -30,6 +31,7 @@ export function createGame(options) {
       score: 0,
       bonusScore: 0,
       isCurrentPlayer: false,
+      isAI: !!aiFlags[i],
     })),
     currentPlayerIndex: 0,
     drawPile: [],
