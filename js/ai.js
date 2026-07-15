@@ -2,8 +2,9 @@
 // 규칙 로직은 절대 두지 않는다: getLegalActions가 만든 선택지 중에서만 고른다.
 import { getCard } from "./data/cards.js";
 import { getVariant } from "./data/variants.js";
+import { traitEffect } from "./data/traits.js";
 import { getLegalActions } from "./engine/actions.js";
-import { getTopCardId, getTargetCardId } from "./engine/hospital.js";
+import { getTargetCardId } from "./engine/hospital.js";
 import { computeScore } from "./engine/scoring.js";
 import { nextRandom } from "./engine/rng.js";
 
@@ -105,16 +106,18 @@ function chooseTraitPhaseAction(state, legal) {
 }
 
 function chooseDecisionAction(state, legal) {
-  switch (state.pendingDecision.type) {
+  const decision = state.pendingDecision;
+  const player = state.players.find((p) => p.playerId === decision.playerId);
+  switch (decision.type) {
     case "monkey_choose_card": {
       // 이미 진료 줄에 있는 종류를 다시 불러오면 곧장 대소동이 난다 — 안전한 선택지가
       // 있으면 그중에서, 없으면(전부 위험하면) 어쩔 수 없이 전체 중에서 고른다.
       const pool = preferSafe(state, legal, (a) => a.value);
-      return bestBySuitPriority(pool);
+      return bestMonkeyChoice(state, player, pool);
     }
     case "mole_choose_card": {
       const pool = preferSafe(state, legal, (a) => a.value);
-      return bestByValue(pool, (a) => getCard(a.value).value);
+      return bestByValue(pool, (a) => getCard(a.value).value + backupValue(state, player, a.value));
     }
     case "dog_choose_target": {
       // 강아지 공포증 상대를 고르면 역공(내 병원에서 카드 하나를 잃음)당하니 피한다.
@@ -122,7 +125,7 @@ function chooseDecisionAction(state, legal) {
         const opponent = state.players.find((p) => p.playerId === a.value.opponentId);
         return !opponent || opponent.traitId !== "misfire";
       });
-      return bestTarget(state, pool.length > 0 ? pool : legal);
+      return bestDogTarget(state, player, pool.length > 0 ? pool : legal);
     }
     case "cat_choose_target": {
       // 훔쳐온 카드가 내 진료 줄에서 이미 나온 종류와 겹치면 스스로 대소동을 낸다.
@@ -130,10 +133,10 @@ function chooseDecisionAction(state, legal) {
         const cardId = catTargetCardId(state, a.value);
         return cardId && !wouldBust(state, cardId);
       });
-      return bestTarget(state, pool.length > 0 ? pool : legal);
+      return bestCatTarget(state, player, pool.length > 0 ? pool : legal);
     }
     case "owl_choose":
-      return chooseOwl(state, legal);
+      return chooseOwl(state, player, legal);
     case "plunder_choose_target":
       return bestByValue(legal, (a) => {
         const target = state.players.find((p) => p.playerId === a.value);
@@ -159,18 +162,85 @@ function catTargetCardId(state, opt) {
   return getTargetCardId(opponent.hospitalStacks[opt.suit], variant);
 }
 
-function bestBySuitPriority(legal) {
-  let best = legal[0];
-  let bestScore = -1;
-  for (const a of legal) {
+// 병원 스택(이미 은행에 넣어둔 카드들) 안에서 지금 점수에 반영되는 값 — 기본은
+// 최고값 한 장(getTopCardId와 같은 기준). "전부 합산" 변형에서는 호출부에서 따로 분기한다.
+function stackTopValue(stack) {
+  if (!stack || stack.length === 0) return 0;
+  return Math.max(...stack.map((cid) => getCard(cid).value));
+}
+
+// 강아지/고양이가 stack에서 targetId를 지금 뽑아가면 그 종류의 점수가 얼마나 떨어지는지.
+// "전부 합산" 변형이면 그 카드 값 그대로가 손해지만, 기본(최고값 한 장) 규칙에서는
+// 뽑혀나간 카드가 최고값이었을 때만, 그것도 남은 카드 중 다음 최고값만큼만 줄어든다 —
+// 백업 카드가 있으면 도둑맞아도 완전히 0으로 떨어지지 않는다는 뜻.
+function stealSwing(state, stack, targetId) {
+  const variant = getVariant(state.activeVariantId);
+  if (variant && variant.scoreStyle === "sum_all") return getCard(targetId).value;
+  const before = stackTopValue(stack);
+  const after = stackTopValue(stack.filter((cid) => cid !== targetId));
+  return before - after;
+}
+
+// 이미 그 종류를 은행에 갖고 있는데 낮은 카드를 하나 더 쌓아두면, 지금 점수는 안 올라도
+// 나중에 강아지/고양이한테 최고값 카드를 도둑맞았을 때 그 종류가 0으로 떨어지지 않고
+// 이 카드가 대신 받쳐준다 — 능력이 아예 없는 심심한 모드에서는 그런 위협이 없다.
+function backupValue(state, player, cardId) {
+  if (state.mode.noAbilities) return 0;
+  const card = getCard(cardId);
+  const stack = player.hospitalStacks[card.suit];
+  if (!stack || stack.length === 0) return 0;
+  return card.value * 0.5;
+}
+
+// 강아지가 제거한 카드의 목적지 — 특기(scavenger 등)가 없으면 귀가 더미로 사라진다.
+function dogDestination(player) {
+  const override = traitEffect(player, "dogDestination");
+  return override ? override() : "discard";
+}
+
+function bestMonkeyChoice(state, player, legal) {
+  return bestByValue(legal, (a) => {
     const suit = getCard(a.value).suit;
-    const score = SUIT_ATTACK_PRIORITY.length - SUIT_ATTACK_PRIORITY.indexOf(suit);
-    if (score > bestScore) {
-      bestScore = score;
-      best = a;
-    }
-  }
-  return best;
+    const priority = SUIT_ATTACK_PRIORITY.length - SUIT_ATTACK_PRIORITY.indexOf(suit);
+    // 종류 우선순위가 지배적이고, 같은 종류끼리는 카드 값(+ 이미 보유 중이면 백업 가치)으로 조정.
+    return priority * 10 + getCard(a.value).value * 0.5 + backupValue(state, player, a.value);
+  });
+}
+
+// 강아지는 기본적으로 상대 카드를 귀가 더미로 보내는 "순수 견제" 능력이라 내 점수엔
+// 안 보탠다 — scavenger 특기로 내 병원에 들어올 때만 그 이득(gainToMe)을 더한다.
+function bestDogTarget(state, player, legal) {
+  const variant = getVariant(state.activeVariantId);
+  const entersMyHospital = dogDestination(player) === "owner_hospital";
+  return bestByValue(legal, (a) => {
+    const opponent = state.players.find((p) => p.playerId === a.value.opponentId);
+    const stack = opponent.hospitalStacks[a.value.suit];
+    const targetId = getTargetCardId(stack, variant);
+    if (!targetId) return -Infinity;
+    const damage = stealSwing(state, stack, targetId);
+    const gainToMe = entersMyHospital
+      ? Math.max(0, getCard(targetId).value - stackTopValue(player.hospitalStacks[a.value.suit]))
+      : 0;
+    return damage + gainToMe;
+  });
+}
+
+// 고양이는 훔친 카드가 곧장 내 병원으로 들어온다 — 내가 실제로 얻는 점수(gainToMe)와
+// 상대가 입는 손해(damage, 특히 백업 없는 종류를 완전히 비우는 경우)를 함께 본다.
+function bestCatTarget(state, player, legal) {
+  const variant = getVariant(state.activeVariantId);
+  return bestByValue(legal, (a) => {
+    const opponent = state.players.find((p) => p.playerId === a.value.opponentId);
+    const stack = opponent.hospitalStacks[a.value.suit];
+    const targetId = getTargetCardId(stack, variant);
+    if (!targetId) return -Infinity;
+    const damage = stealSwing(state, stack, targetId);
+    const gainToMe =
+      variant && variant.scoreStyle === "sum_all"
+        ? getCard(targetId).value
+        : Math.max(0, getCard(targetId).value - stackTopValue(player.hospitalStacks[a.value.suit]));
+    return gainToMe + damage * 0.5;
+  });
 }
 
 function bestByValue(legal, valueFn) {
@@ -186,20 +256,12 @@ function bestByValue(legal, valueFn) {
   return best;
 }
 
-function bestTarget(state, legal) {
-  return bestByValue(legal, (a) => {
-    const opponent = state.players.find((p) => p.playerId === a.value.opponentId);
-    const topId = getTopCardId(opponent.hospitalStacks[a.value.suit]);
-    return topId ? getCard(topId).value : 0;
-  });
-}
-
-function chooseOwl(state, legal) {
+function chooseOwl(state, player, legal) {
   const bankOpt = legal.find((a) => a.value.action === "bank");
   const takeOpts = legal.filter((a) => a.value.action === "take");
   const safeTakes = takeOpts.filter((a) => !wouldBust(state, a.value.cardId));
   if (safeTakes.length > 0 && (!bankOpt || shouldKeepGoing(state))) {
-    return bestByValue(safeTakes, (a) => getCard(a.value.cardId).value);
+    return bestByValue(safeTakes, (a) => getCard(a.value.cardId).value + backupValue(state, player, a.value.cardId));
   }
   return bankOpt || takeOpts[0];
 }
