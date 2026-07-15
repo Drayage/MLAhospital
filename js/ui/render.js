@@ -119,11 +119,49 @@ export function playerPanelHtml(state, player, aiThinking) {
   </div>`;
 }
 
-export function setupScreenHtml() {
+// 첫 화면: 한 기기로 같이(hotseat) vs 온라인으로 같이(다른 기기) 중 선택.
+export function modeChoiceHtml() {
   return `
-  <div class="mla-panel">
+  <div class="mla-panel mla-center">
     <h1 style="font-size:22px">🏥 우리집 동물병원</h1>
     <p class="mla-muted">가족 단위 환자를 접수하는 푸시 유어 럭 카드 게임</p>
+  </div>
+  <button type="button" data-action="choose-local" class="mla-choice-btn" style="text-align:center; font-weight:700; padding:16px;">📱 한 기기로 같이 하기<br><span class="mla-muted" style="font-weight:400">기기 하나를 돌려가며 플레이해요</span></button>
+  <button type="button" data-action="choose-online" class="mla-choice-btn" style="text-align:center; font-weight:700; padding:16px; margin-top:10px;">🌐 온라인으로 같이 하기<br><span class="mla-muted" style="font-weight:400">각자 기기에서 방을 만들거나 코드로 참가해요</span></button>`;
+}
+
+function backLinkHtml() {
+  return `<button type="button" data-action="back-to-mode-choice" class="mla-inline-link" style="margin-bottom:6px">◀ 다른 방식으로 플레이</button>`;
+}
+
+// 특기/특수모드/변형규칙 설정 필드 — 로컬 설정 폼과 온라인 호스트 로비에서 공용으로 쓴다.
+function gameOptionFieldsHtml({ prefix = "" } = {}) {
+  return `
+    <div class="mla-setup-field">
+      <label><input type="checkbox" name="${prefix}useTraits" /> 수의사 특기 사용 (각자 특기 1개 선택)</label>
+    </div>
+    <div class="mla-setup-field">
+      <label>🎲 특수 모드 (여러 개 동시에 켤 수 있어요)</label>
+      <label style="margin-top:6px"><input type="checkbox" name="${prefix}partyMode" /> 🎉 파티 모드 — 카드가 2배(120장)라 더 오래, 더 크게 쌓여요</label>
+      <label style="margin-top:6px"><input type="checkbox" name="${prefix}kingOfEr" /> 👑 응급실의 왕 — 한 턴에 10종류를 모두 입원시키면 왕관(+10점)을 얻어요. 왕관은 하나뿐, 가장 최근 성공자가 가져가요</label>
+      <label style="margin-top:6px"><input type="checkbox" name="${prefix}noAbilities" /> 😴 심심한 모드 — 동물 능력이 전부 사라지고 순수하게 숫자만 겨루는 게임이 돼요</label>
+    </div>
+    <div class="mla-setup-field">
+      <label>오늘의 병원 규칙</label>
+      <select name="${prefix}variantMode">
+        <option value="none" selected>사용 안 함 (기본 규칙)</option>
+        <option value="random">무작위로 1개 적용</option>
+        <option value="manual">직접 선택</option>
+      </select>
+    </div>`;
+}
+
+export function setupScreenHtml() {
+  return `
+  ${backLinkHtml()}
+  <div class="mla-panel">
+    <h2 style="font-size:18px">📱 한 기기로 같이</h2>
+    <p class="mla-muted">기기 하나를 돌려가며 플레이해요</p>
   </div>
   <form id="mla-setup-form">
     <div class="mla-setup-field">
@@ -136,25 +174,68 @@ export function setupScreenHtml() {
     </div>
     <p class="mla-muted" style="margin:-4px 0 10px">🤖 체크하면 그 자리는 AI가 대신 플레이해요.</p>
     <div id="mla-name-fields"></div>
-    <div class="mla-setup-field">
-      <label><input type="checkbox" name="useTraits" /> 수의사 특기 사용 (각자 특기 1개 선택)</label>
-    </div>
-    <div class="mla-setup-field">
-      <label>🎲 특수 모드 (여러 개 동시에 켤 수 있어요)</label>
-      <label style="margin-top:6px"><input type="checkbox" name="partyMode" /> 🎉 파티 모드 — 카드가 2배(120장)라 더 오래, 더 크게 쌓여요</label>
-      <label style="margin-top:6px"><input type="checkbox" name="kingOfEr" /> 👑 응급실의 왕 — 한 턴에 10종류를 모두 입원시키면 왕관(+10점)을 얻어요. 왕관은 하나뿐, 가장 최근 성공자가 가져가요</label>
-      <label style="margin-top:6px"><input type="checkbox" name="noAbilities" /> 😴 심심한 모드 — 동물 능력이 전부 사라지고 순수하게 숫자만 겨루는 게임이 돼요</label>
-    </div>
-    <div class="mla-setup-field">
-      <label>오늘의 병원 규칙</label>
-      <select name="variantMode">
-        <option value="none" selected>사용 안 함 (기본 규칙)</option>
-        <option value="random">무작위로 1개 적용</option>
-        <option value="manual">직접 선택</option>
-      </select>
-    </div>
+    ${gameOptionFieldsHtml()}
     <button type="submit" data-action="start-game" style="width:100%; padding:14px; border:0; border-radius:12px; background:var(--accent-strong); color:#fff; font-size:16px; font-weight:800;">진료 시작</button>
   </form>`;
+}
+
+// 온라인 진입: 이름 입력 + (방 코드 입력하면 참가, 비워두면 새 방 생성).
+export function onlineEntryHtml({ error = null } = {}) {
+  return `
+  ${backLinkHtml()}
+  <div class="mla-panel">
+    <h2 style="font-size:18px">🌐 온라인으로 같이</h2>
+    <p class="mla-muted">각자 기기에서 접속해요. 방을 만든 사람이 코드를 공유해주세요.</p>
+  </div>
+  ${error ? `<div class="mla-bust-banner">${esc(error)}</div>` : ""}
+  <form id="mla-online-form">
+    <div class="mla-setup-field">
+      <label>내 이름</label>
+      <input type="text" name="displayName" maxlength="10" value="복동" />
+    </div>
+    <div class="mla-setup-field">
+      <label>방 코드 (참가할 때만 입력 — 새로 만들려면 비워두세요)</label>
+      <input type="text" name="roomCode" maxlength="8" placeholder="예: AB3K7" style="text-transform:uppercase" />
+    </div>
+    <button type="submit" data-action="online-enter" style="width:100%; padding:14px; border:0; border-radius:12px; background:var(--accent-strong); color:#fff; font-size:16px; font-weight:800;">참가/방 만들기</button>
+  </form>`;
+}
+
+// 온라인 대기실 — 방 코드/참가자 목록 + (호스트만) 설정과 시작 버튼.
+export function onlineLobbyHtml(room, code, myId) {
+  const isHost = room.hostId === myId;
+  const players = Object.values(room.players || {}).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+  const rows = players
+    .map((p) => {
+      const tags = [p.id === myId ? "나" : null, p.id === room.hostId ? "호스트" : null].filter(Boolean).join(" · ");
+      return `<div class="mla-player-card">
+        <div class="mla-player-head">
+          <span>${p.online ? "🟢" : "⚪"} ${esc(p.name)}${tags ? ` <span class="mla-muted">(${tags})</span>` : ""}</span>
+        </div>
+      </div>`;
+    })
+    .join("");
+  const canStart = players.length >= 2 && players.length <= 4;
+  const cfg = room.config || {};
+  const hostControls = isHost
+    ? `<form id="mla-online-config-form">${gameOptionFieldsHtml({ prefix: "cfg-" })}</form>
+       <button type="button" data-action="online-start" class="mla-choice-btn" style="text-align:center;font-weight:800;background:var(--accent-strong);color:#fff;" ${canStart ? "" : "disabled"}>
+         ${canStart ? "🚀 게임 시작" : `플레이어 2~4명이 모이면 시작할 수 있어요 (현재 ${players.length}명)`}
+       </button>`
+    : `<p class="mla-muted">
+        특기 사용: ${cfg.useTraits ? "예" : "아니오"} · 파티 모드: ${cfg.deckMultiplier > 1 ? "예" : "아니오"} ·
+        응급실의 왕: ${cfg.kingOfEr ? "예" : "아니오"} · 심심한 모드: ${cfg.noAbilities ? "예" : "아니오"}
+      </p>
+      <p class="mla-muted">호스트가 게임을 시작하길 기다리는 중...</p>`;
+  return `
+  <div class="mla-panel mla-center">
+    <h2>🚪 대기실</h2>
+    <p>방 코드: <b style="font-size:20px; letter-spacing:2px;">${esc(code)}</b></p>
+    <button type="button" data-action="copy-room-code" data-code="${esc(code)}" class="mla-inline-link">코드 복사하기</button>
+  </div>
+  ${rows}
+  <div class="mla-panel">${hostControls}</div>
+  <button type="button" data-action="leave-online-room" class="mla-choice-btn" style="text-align:center;">방 나가기</button>`;
 }
 
 export function nameFieldsHtml(count) {
@@ -214,11 +295,13 @@ export function harborTargetSelectionHtml(state) {
     </div>`;
 }
 
-// AI 차례에는 사람이 대신 고를 수 있는 버튼을 보여주지 않고, 고르는 중이라고만 알려준다.
-export function aiTraitWaitingHtml(player, decisionType) {
+// AI(또는 온라인에서 남의) 차례에는 사람이 대신 고를 수 있는 버튼을 보여주지 않고,
+// 고르는 중이라고만 알려준다.
+export function aiTraitWaitingHtml(player, decisionType, { isAI = true } = {}) {
   const label = decisionType === "harbor_watch_target" ? "옆 병원을 지정하고" : "특기를 고르고";
+  const icon = isAI ? "🤖" : "⏳";
   return `<div class="mla-panel mla-center">
-    <p style="font-size:15px">🤖 <b>${esc(player.displayName)}</b>님이 ${label} 있어요...</p>
+    <p style="font-size:15px">${icon} <b>${esc(player.displayName)}</b>님이 ${label} 있어요...</p>
   </div>`;
 }
 

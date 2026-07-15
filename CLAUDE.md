@@ -1,13 +1,13 @@
 # 우리집 동물병원 — Dead Man's Draw 규칙 기반 동물병원 접수 카드 게임
 
-바닐라 JS / PWA / 로컬 한 기기 돌려가며 플레이(hotseat, 2~4명) / Firebase 온라인 미사용 / GitHub Pages 배포.
+바닐라 JS / PWA / 로컬 한 기기 돌려가며 플레이(hotseat, 2~4명) + 온라인(각자 기기, Firebase RTDB) / GitHub Pages 배포.
 
 ## 파일 지도
 
 <!-- 파일당 500~800줄 이내로 유지. 데이터(카드/특기/변형규칙)는 로직과 분리해
      js/data/*.js에 둘 것 — 콘텐츠 수정 요청이 데이터 파일만 읽고 끝나게. -->
 - `js/data/animals.js` — 환자(동물) 10종 정의 (이름/아이콘/설명) — **콘텐츠 수정은 여기**
-- `js/data/cards.js` — 카드 60장 생성/조회 (`deckMultiplier`로 카드 2배 확장 대비)
+- `js/data/cards.js` — 카드 60장 생성/조회 (`deckMultiplier`로 카드 2배 확장 — 파티 모드가 씀)
 - `js/data/traits.js` — 수의사 특기 17종 (효과 훅 포함)
 - `js/data/variants.js` — 오늘의 병원 규칙 6종 (효과 훅 포함)
 - `js/engine/state.js` — 게임 상태 생성/설정 (명세 5장)
@@ -23,7 +23,12 @@
 - `js/ui/render.js` — 순수 렌더 함수 (상태 → HTML 문자열), 대소동 리빌 화면·카드 플립 포함
 - `js/ai.js` — AI 상대 정책 (`getLegalActions`가 만든 선택지 중에서만 고름, 규칙 로직 없음)
 - `js/palettes.js` — 사운드 팔레트 (`HOSPITAL`: 말랑 파스텔 + 병원 종소리)
-- `js/storage.js` — 새로고침 복원
+- `js/storage.js` — 새로고침 복원 + 온라인 재입장 정보(`saveRejoin`/`loadRejoin`)
+- `js/net.js` — Firebase RTDB 원시 I/O (방 생성/참가/seq 가드 쓰기/구독) — `js/ui.js`에서
+  실제 온라인 플레이를 시도할 때만 동적 `import()`되어, 로컬 hotseat만 쓰는 사람은
+  네트워크(gstatic.com 등)에 전혀 의존하지 않는다
+- `js/online.js` — 온라인 오케스트레이션(좌석 배정/내 차례 판정/행동 전송) — DOM은 모름,
+  `js/net.js`처럼 순수 데이터 계층
 - `sw.js` — PWA 캐시 (network-first + CACHE_VERSION + controllerchange 1회 reload)
 - `tests/engine.test.mjs` — `node:test` 기반 엔진 필수 테스트 (명세 22장 25개 케이스)
 - `scripts/simulate.mjs` — headless 시뮬레이터 (랜덤 정책, 교착 감지)
@@ -77,11 +82,30 @@
 - 코드를 고친 커밋마다 `js/app-config.js`의 `APP_VERSION`과 `sw.js`의
   `CACHE_VERSION`을 함께 bump할 것
 - 커밋 전 검증·SW·모바일 레이아웃: `game-kit` 플러그인의 `webgame-ship` 스킬 참조
-  (온라인 멀티플레이를 나중에 추가하면 `firebase-online` 스킬도 참조)
+  (온라인 멀티플레이(`js/net.js`/`js/online.js`) 관련 작업은 `firebase-online` 스킬도 참조)
 
-## 온라인 멀티플레이 (미포함, 확장 지점만 존재)
+## 온라인 멀티플레이
 
-이번 버전은 로컬 한 기기 돌려가며 플레이(hotseat)만 지원한다. 온라인 동기화가
-필요해지면 `game-baserule/starter/js/net.js`를 다시 가져와 연결한다 — 이때 공유
-Firebase 프로젝트의 config 값과 `database.rules.snippet.json` 병합이 필요하므로
-반드시 사용자 확인 후 진행할 것 (다른 게임들과 같은 프로젝트를 공유한다).
+`game-baserule/starter/js/net.js`를 이식해 구현됨 (`js/net.js`). 핵심 설계:
+
+- DB 경로는 항상 `games/mlahospital/rooms/{code}` 아래로만 쓴다. 이 Firebase
+  프로젝트는 여러 게임이 공유하고, 실제 배포된 규칙(`{"games": {".read": true,
+  ".write": true}}`)이 "games" 서브트리만 열어두므로 **절대 이 경로 밖에 쓰면
+  안 된다** — 원본 game-baserule의 기본 경로(`${APP_ID}_rooms/`)와 다르다는 점에 주의.
+- 온라인 게임은 오직 사람끼리만 지원한다(AI 좌석 없음) — 누가 AI 턴을 대신
+  처리할지 정할 필요가 없어져 호스트 권한 문제가 통째로 사라진다.
+- 방 생성/참가 → 로비(`phase:"lobby"`, 호스트가 특기/변형규칙/특수모드 설정) →
+  호스트가 시작을 누르면 참가 순서(`joinedAt`)대로 좌석을 배정해 로컬
+  `createGame()`으로 실제 엔진 state를 만들고 각 플레이어에 `netId`를 붙여
+  방에 씀(`phase:"playing"`).
+- 턴마다: 내 차례인 클라이언트만 `applyAction`을 로컬로 계산해
+  `writeState(code, seq, nextState)`로 seq 가드 쓰기 — 모든 클라이언트(행동을
+  낸 사람 포함)는 `subscribeRoom`이 돌려주는 서버 확정 상태만 그린다(낙관적
+  렌더 금지). RNG가 `state.seed`+`state.rngCounter` 기반 결정적 연산이라
+  아무 클라이언트나 계산해도 같은 결과가 나온다.
+- `js/ui.js`는 로컬/온라인 두 경로가 `game`(현재 렌더 중인 엔진 state)을 공유하도록
+  설계되어 있다 — 온라인이면 `game`이 구독으로 받은 서버 상태의 미러일 뿐이라,
+  `gameBoardHtml` 등 렌더 함수와 대소동/왕관/카드-연쇄 연출 로직을 그대로 재사용한다.
+- Firebase config는 비밀이 아니라 `js/app-config.js`에 그대로 커밋되어 있다
+  (보안은 database rules가 담당). **새 프로젝트를 만들지 말고** 항상 이 값을
+  재사용할 것 — 다른 게임들과 프로젝트를 공유하기 때문.

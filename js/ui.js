@@ -2,7 +2,7 @@
 import { createGame } from "./engine/state.js";
 import { getLegalActions, applyAction } from "./engine/actions.js";
 import { finishGame } from "./engine/scoring.js";
-import { saveGame, loadGame, clearGame } from "./storage.js";
+import { saveGame, loadGame, clearGame, loadRejoin } from "./storage.js";
 import { playSfx, startBgm, stopBgm } from "./audio.js";
 import { HOSPITAL } from "./palettes.js";
 import { ANIMALS } from "./data/animals.js";
@@ -10,8 +10,11 @@ import { getTrait } from "./data/traits.js";
 import { getCard } from "./data/cards.js";
 import { chooseAiAction } from "./ai.js";
 import {
+  modeChoiceHtml,
   setupScreenHtml,
   nameFieldsHtml,
+  onlineEntryHtml,
+  onlineLobbyHtml,
   traitSelectionHtml,
   harborTargetSelectionHtml,
   aiTraitWaitingHtml,
@@ -29,12 +32,35 @@ let lastFlippedCardId = null; // 이미 뒤집기 연출을 보여준 카드 —
 let surrendered = false; // 항복으로 게임이 끝났는지 (게임오버 화면 문구 구분용)
 let animating = false; // 카드 연쇄 진입을 한 장씩 보여주는 중 — 이 사이엔 새 행동을 막는다
 
+// ── 온라인 모드 — js/online.js(과 그 아래 js/net.js/Firebase SDK)는 실제로 온라인을
+// 쓸 때만 동적 import한다. 로컬 hotseat만 즐기는 사람은 네트워크(gstatic.com 등)에
+// 전혀 의존하지 않는다(오프라인 PWA 원칙 유지) — 이게 game-baserule의 net.js를
+// 상단에서 바로 정적 import하지 않은 이유다.
+let screen = "mode-choice"; // "mode-choice" | "local-setup" | "online-entry" (game==null일 때만 의미 있음)
+let online = null; // 동적 import된 js/online.js 모듈
+let onlineModulePromise = null;
+let onlineCode = null;
+let onlineRoom = null;
+let onlineEntryError = null;
+
 const AI_THINK_DELAY_MS = 1300; // 사람처럼 살짝 고민하는 느낌
 const BUST_AUTO_DISMISS_MS = 2600;
 
 const gameArea = () => document.getElementById("game-area");
 
-export function startApp() {
+async function loadOnlineModule() {
+  if (online) return online;
+  if (!onlineModulePromise) {
+    onlineModulePromise = import("./online.js").then((mod) => {
+      mod.onRoomChange(handleIncomingRoom);
+      online = mod;
+      return mod;
+    });
+  }
+  return onlineModulePromise;
+}
+
+export async function startApp() {
   document.addEventListener("click", onClick);
   document.addEventListener("submit", onSubmit);
   document.addEventListener("change", onChange);
@@ -45,8 +71,55 @@ export function startApp() {
     // 새로고침으로 진행 중인 판을 이어할 때도 배경음이 다시 흘러나오게 한다
     // (원래는 "새 게임 시작" 제출 시에만 틀어서, 새로고침 후엔 무음이었음).
     startBgm(HOSPITAL, "main");
+    render();
+    return;
+  }
+
+  // 온라인 재입장 정보가 있을 때만 net.js를 불러온다 — 순수 로컬 플레이어는 영향 없음.
+  if (loadRejoin()) {
+    try {
+      const net = await loadOnlineModule();
+      const info = await net.attemptRejoin();
+      if (info) {
+        startBgm(HOSPITAL, "main");
+        return; // 구독 콜백(handleIncomingRoom)이 곧 상태를 넣고 render()를 호출한다
+      }
+    } catch (err) {
+      console.error("온라인 재입장 실패", err);
+    }
   }
   render();
+}
+
+// 온라인 방 상태가 바뀔 때마다(구독 콜백) 호출된다. DOM은 여기서 만지지 않고
+// game/onlineRoom만 갱신한 뒤 정해진 경로(render 또는 handleOutcome)로 넘긴다.
+function handleIncomingRoom(room, code) {
+  onlineRoom = room;
+  onlineCode = code;
+  if (!room) {
+    render();
+    return;
+  }
+  if (room.phase === "playing" && room.state) {
+    applyIncomingState(room.state);
+  } else {
+    game = null;
+    render();
+  }
+}
+
+// 서버에서 확정된 새 상태를 받아 반영한다 — 내가 낸 행동이든 남이 낸 행동이든 경로가
+// 같다(net.js 설계 원칙 4: 낙관적 렌더 금지, 서버 확정 상태만 그린다).
+function applyIncomingState(newState) {
+  if (!game) {
+    game = newState;
+    render();
+    return;
+  }
+  const playAreaBefore = game.playArea.slice();
+  const logLenBefore = game.actionLog.length;
+  game = newState;
+  handleOutcome(playAreaBefore, logLenBefore, null);
 }
 
 // 현재 결정을 내려야 하는 플레이어 ID (변형규칙 선택처럼 특정 플레이어에게 속하지 않으면 null)
@@ -81,9 +154,22 @@ function computeFlipTarget() {
 }
 
 function render() {
+  // 온라인 대기실 — 게임이 아직 시작 전(phase:"lobby")이면 로비 화면을 보여준다.
+  if (onlineCode && onlineRoom && onlineRoom.phase === "lobby") {
+    gameArea().innerHTML = onlineLobbyHtml(onlineRoom, onlineCode, online.myId());
+    renderActionBar();
+    return;
+  }
+
   if (!game) {
-    gameArea().innerHTML = setupScreenHtml();
-    regenNameFields();
+    if (screen === "online-entry") {
+      gameArea().innerHTML = onlineEntryHtml({ error: onlineEntryError });
+    } else if (screen === "local-setup") {
+      gameArea().innerHTML = setupScreenHtml();
+      regenNameFields();
+    } else {
+      gameArea().innerHTML = modeChoiceHtml();
+    }
     renderActionBar();
     return;
   }
@@ -97,10 +183,13 @@ function render() {
   }
 
   const actor = currentActor();
+  const myTurn = onlineCode ? online.isMyTurn(game) : true;
   if (game.phase === "trait_selection") {
     const decisionType = game.pendingDecision.type;
     if (actor && actor.isAI) {
       gameArea().innerHTML = aiTraitWaitingHtml(actor, decisionType);
+    } else if (onlineCode && !myTurn) {
+      gameArea().innerHTML = aiTraitWaitingHtml(actor, decisionType, { isAI: false });
     } else if (decisionType === "harbor_watch_target") {
       gameArea().innerHTML = harborTargetSelectionHtml(game);
     } else {
@@ -111,10 +200,11 @@ function render() {
   } else if (game.phase === "game_over") {
     gameArea().innerHTML = gameOverHtml(game, { surrendered });
     stopBgm();
-    clearGame();
+    if (!onlineCode) clearGame(); // 온라인 저장은 로컬 저장과 별개 — 지우면 안 됨
   } else {
+    const suppressInteractive = !!(actor && actor.isAI) || (onlineCode && !myTurn);
     gameArea().innerHTML = gameBoardHtml(game, {
-      aiThinking: !!(actor && actor.isAI),
+      aiThinking: suppressInteractive,
       alreadyFlippedCardId: computeFlipTarget(),
     });
   }
@@ -136,7 +226,8 @@ function renderActionBar() {
     return;
   }
 
-  // 항복은 누구 차례든(심지어 AI가 고민 중일 때도) 바로 게임을 끝낼 수 있어야 한다.
+  // 항복은 누구 차례든(심지어 AI가 고민 중이거나 온라인에서 남의 차례일 때도) 바로
+  // 게임을 끝낼 수 있어야 한다.
   surrenderBtn.hidden = false;
 
   const actor = currentActor();
@@ -145,6 +236,15 @@ function renderActionBar() {
     thinking.className = "mla-pill mla-pill-soft";
     thinking.textContent = `🤖 ${actor.displayName}님이 고민 중...`;
     primary.appendChild(thinking);
+    return;
+  }
+
+  const myTurn = onlineCode ? online.isMyTurn(game) : true;
+  if (onlineCode && !myTurn) {
+    const waitPill = document.createElement("span");
+    waitPill.className = "mla-pill mla-pill-soft";
+    waitPill.textContent = `⏳ ${actor ? actor.displayName : ""}님 차례를 기다리는 중...`;
+    primary.appendChild(waitPill);
     return;
   }
 
@@ -174,14 +274,48 @@ function regenNameFields() {
 }
 
 function onChange(e) {
-  if (e.target && e.target.id === "mla-player-count") regenNameFields();
+  if (!e.target) return;
+  if (e.target.id === "mla-player-count") {
+    regenNameFields();
+    return;
+  }
+  if (e.target.closest("#mla-online-config-form")) {
+    handleOnlineConfigChange(e.target.closest("#mla-online-config-form"));
+  }
+}
+
+async function handleOnlineConfigChange(form) {
+  if (!online || !onlineCode) return;
+  const data = new FormData(form);
+  const patch = {
+    useTraits: data.get("cfg-useTraits") === "on",
+    variantMode: data.get("cfg-variantMode") || "none",
+    deckMultiplier: data.get("cfg-partyMode") === "on" ? 2 : 1,
+    kingOfEr: data.get("cfg-kingOfEr") === "on",
+    noAbilities: data.get("cfg-noAbilities") === "on",
+  };
+  try {
+    await online.updateConfig(patch);
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 function onSubmit(e) {
-  const form = e.target.closest("#mla-setup-form");
-  if (!form) return;
-  e.preventDefault();
-  const data = new FormData(form);
+  const setupForm = e.target.closest("#mla-setup-form");
+  if (setupForm) {
+    e.preventDefault();
+    startLocalGame(new FormData(setupForm));
+    return;
+  }
+  const onlineForm = e.target.closest("#mla-online-form");
+  if (onlineForm) {
+    e.preventDefault();
+    handleOnlineEnter(new FormData(onlineForm));
+  }
+}
+
+function startLocalGame(data) {
   const playerCount = Number(data.get("playerCount"));
   const playerNames = data.getAll("playerName").map((s) => s.trim() || "플레이어").slice(0, playerCount);
   const aiIndexes = new Set(data.getAll("playerIsAI").map(Number));
@@ -199,6 +333,38 @@ function onSubmit(e) {
   pendingBust = null;
   surrendered = false;
   persistAndRender();
+}
+
+async function handleOnlineEnter(data) {
+  const displayName = (data.get("displayName") || "").trim() || "플레이어";
+  const codeRaw = (data.get("roomCode") || "").trim().toUpperCase();
+  onlineEntryError = null;
+
+  let net;
+  try {
+    net = await loadOnlineModule();
+  } catch (err) {
+    // 모듈/Firebase SDK 자체를 못 불러온 경우(네트워크 문제) — 브라우저의 기술적인
+    // 에러 문구 대신 사람이 이해할 수 있는 메시지를 보여준다.
+    console.error(err);
+    onlineEntryError = "온라인 접속에 실패했어요. 인터넷 연결을 확인하고 다시 시도해주세요.";
+    render();
+    return;
+  }
+
+  try {
+    if (codeRaw) {
+      await net.joinExistingRoom(codeRaw, displayName);
+    } else {
+      await net.hostCreateRoom(displayName);
+    }
+    startBgm(HOSPITAL, "main");
+  } catch (err) {
+    // 방을 못 찾음 등 net.js가 던지는 메시지는 이미 사람이 읽을 수 있는 한국어라 그대로 보여준다.
+    console.error(err);
+    onlineEntryError = err.message || "연결에 실패했어요. 다시 시도해주세요.";
+    render();
+  }
 }
 
 function onClick(e) {
@@ -223,8 +389,55 @@ function onClick(e) {
   }
 }
 
-function handleActionClick(btn) {
+async function handleActionClick(btn) {
   const action = btn.getAttribute("data-action");
+
+  if (action === "choose-local") {
+    screen = "local-setup";
+    render();
+    return;
+  }
+  if (action === "choose-online") {
+    screen = "online-entry";
+    onlineEntryError = null;
+    render();
+    return;
+  }
+  if (action === "back-to-mode-choice") {
+    screen = "mode-choice";
+    render();
+    return;
+  }
+  if (action === "leave-online-room") {
+    if (online) online.leaveOnlineGame();
+    stopBgm();
+    onlineCode = null;
+    onlineRoom = null;
+    game = null;
+    screen = "mode-choice";
+    render();
+    return;
+  }
+  if (action === "copy-room-code") {
+    const code = btn.getAttribute("data-code");
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(code).then(
+        () => showToast("코드를 복사했어요"),
+        () => {}
+      );
+    }
+    return;
+  }
+  if (action === "online-start") {
+    if (!online || !onlineRoom || animating) return;
+    try {
+      await online.hostStartGame(onlineRoom);
+    } catch (err) {
+      console.error(err);
+      playSfx(HOSPITAL, "error");
+    }
+    return; // 구독 콜백이 곧 "playing" 상태를 넣어준다
+  }
 
   if (action === "dismiss-bust") {
     dismissBust();
@@ -236,6 +449,16 @@ function handleActionClick(btn) {
     clearTimeout(chainTimer);
     animating = false;
     stopBgm();
+    if (onlineCode && online) {
+      try {
+        await online.returnToLobby();
+      } catch (err) {
+        console.error(err);
+      }
+      game = null;
+      render();
+      return;
+    }
     game = null;
     pendingBust = null;
     clearGame();
@@ -249,10 +472,10 @@ function handleActionClick(btn) {
   }
   if (action === "confirm-surrender") {
     document.getElementById("surrender-modal").close();
-    doSurrender();
+    await doSurrender();
     return;
   }
-  if (btn.closest("#mla-setup-form")) return; // submit이 처리
+  if (btn.closest("#mla-setup-form") || btn.closest("#mla-online-form")) return; // submit이 처리
 
   if (!game || pendingBust || animating) return;
 
@@ -266,10 +489,27 @@ function handleActionClick(btn) {
   else if (action === "decide") engineAction = { type: "DECIDE", value: JSON.parse(btn.getAttribute("data-value")) };
   if (!engineAction) return;
 
-  commitAction(engineAction);
+  if (onlineCode) {
+    dispatchOnlineAction(engineAction);
+  } else {
+    commitAction(engineAction);
+  }
 }
 
-// 사람이 누른 행동이든 AI가 고른 행동이든 같은 경로로 처리한다.
+// 온라인 중 내 차례 행동 — 로컬에서 결정적으로 계산해 서버에 seq 가드로 써넣는다.
+// 화면은 여기서 직접 바꾸지 않는다: subscribeRoom이 확정 상태를 돌려줄 때
+// handleIncomingRoom → applyIncomingState 경로로만 갱신한다(낙관적 렌더 금지).
+async function dispatchOnlineAction(engineAction) {
+  if (!online || !onlineRoom) return;
+  try {
+    await online.sendAction(onlineRoom, engineAction);
+  } catch (err) {
+    console.error(err);
+    playSfx(HOSPITAL, "error");
+  }
+}
+
+// 사람이 누른 행동이든 AI가 고른 행동이든(로컬 한정) 같은 경로로 처리한다.
 function commitAction(engineAction) {
   const playAreaBefore = game.playArea.slice(); // 이번 행동 전에 이미 진료 줄에 있던 카드들
   const logLenBefore = game.actionLog.length;
@@ -280,7 +520,12 @@ function commitAction(engineAction) {
     playSfx(HOSPITAL, "error");
     return;
   }
+  handleOutcome(playAreaBefore, logLenBefore, engineAction);
+}
 
+// commitAction(로컬 mutation)과 applyIncomingState(온라인 통째 교체) 둘 다 이 지점부터
+// 같은 후처리를 탄다: game은 이미 최종 상태다.
+function handleOutcome(playAreaBefore, logLenBefore, engineAction) {
   const newEntries = game.actionLog.slice(logLenBefore);
   const bustEntry = newEntries.find((entry) => entry.type === "bust");
   const bankEntry = newEntries.find((entry) => entry.type === "bank");
@@ -344,8 +589,8 @@ function animateChainedEntries(playAreaBefore, enteredCardIds, engineAction, bus
 
 // 항복: 진행 중이던 진료 줄(아직 확보 안 한 카드)은 그대로 날리고, 지금까지 입원시킨
 // 카드만으로 즉시 점수를 매겨 게임을 끝낸다 — 대기실 덱이 자연히 떨어졌을 때와 같은
-// finishGame 경로를 그대로 재사용한다.
-function doSurrender() {
+// finishGame 경로를 그대로 재사용한다. 온라인이면 그 결과를 방에도 반영한다.
+async function doSurrender() {
   if (!game || game.phase === "game_over") return;
   clearTimeout(aiTimer);
   clearTimeout(bustTimer);
@@ -353,6 +598,19 @@ function doSurrender() {
   animating = false;
   pendingBust = null;
   surrendered = true;
+
+  if (onlineCode && online) {
+    try {
+      await online.surrenderOnline(onlineRoom);
+    } catch (err) {
+      console.error(err);
+      playSfx(HOSPITAL, "error");
+      return;
+    }
+    playSfx(HOSPITAL, "win");
+    return; // 구독 콜백이 곧 game_over 상태를 넣어준다
+  }
+
   finishGame(game);
   playSfx(HOSPITAL, "win");
   persistAndRender();
@@ -403,6 +661,7 @@ function dismissBust() {
 }
 
 // 현재 결정권자가 AI면 잠시 후 스스로 행동을 골라 진행한다 (사람처럼 약간의 텀을 둔다).
+// 온라인 게임엔 AI 좌석이 없으므로(현재 지원 범위 밖) 이 함수는 자연히 no-op이 된다.
 function scheduleAiIfNeeded() {
   clearTimeout(aiTimer);
   if (!game || pendingBust || game.phase === "game_over") return;
@@ -454,6 +713,6 @@ function showTraitInfo(traitId) {
 }
 
 function persistAndRender() {
-  if (game && game.phase !== "game_over") saveGame(game);
+  if (game && game.phase !== "game_over" && !onlineCode) saveGame(game);
   render();
 }
