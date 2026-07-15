@@ -208,18 +208,29 @@ export function onlineLobbyHtml(room, code, myId) {
   const rows = players
     .map((p) => {
       const tags = [p.id === myId ? "나" : null, p.id === room.hostId ? "호스트" : null].filter(Boolean).join(" · ");
+      const status = p.isAI ? "🤖" : p.online ? "🟢" : "⚪";
+      // AI는 호스트가 언제든 뺄 수 있게 — 실제 사람은 스스로 나가는 것 외엔 뺄 방법을 주지 않는다.
+      const removeBtn =
+        isHost && p.isAI
+          ? `<button type="button" data-action="online-remove-player" data-player-id="${esc(p.id)}" class="mla-inline-link" style="margin:0">빼기</button>`
+          : "";
       return `<div class="mla-player-card">
         <div class="mla-player-head">
-          <span>${p.online ? "🟢" : "⚪"} ${esc(p.name)}${tags ? ` <span class="mla-muted">(${tags})</span>` : ""}</span>
+          <span>${status} ${esc(p.name)}${tags ? ` <span class="mla-muted">(${tags})</span>` : ""}</span>
+          ${removeBtn}
         </div>
       </div>`;
     })
     .join("");
   const canStart = players.length >= 2 && players.length <= 4;
   const cfg = room.config || {};
+  const aiControls = isHost
+    ? `<button type="button" data-action="online-add-ai" class="mla-inline-link" ${players.length >= 4 ? "disabled" : ""}>🤖 AI 추가</button>`
+    : "";
   const hostControls = isHost
     ? `<form id="mla-online-config-form">${gameOptionFieldsHtml({ prefix: "cfg-" })}</form>
-       <button type="button" data-action="online-start" class="mla-choice-btn" style="text-align:center;font-weight:800;background:var(--accent-strong);color:#fff;" ${canStart ? "" : "disabled"}>
+       ${aiControls}
+       <button type="button" data-action="online-start" class="mla-choice-btn" style="text-align:center;font-weight:800;background:var(--accent-strong);color:#fff;margin-top:8px;" ${canStart ? "" : "disabled"}>
          ${canStart ? "🚀 게임 시작" : `플레이어 2~4명이 모이면 시작할 수 있어요 (현재 ${players.length}명)`}
        </button>`
     : `<p class="mla-muted">

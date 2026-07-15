@@ -1,7 +1,7 @@
 // 서비스워커 — 캐시 고착 방지 확정 패턴 (4개 프로젝트가 각자 도달한 동일 결론)
 // 앱 코드(html/js/css): network-first / 불변 에셋: cache-first
 // ★ 코드를 수정한 커밋마다 CACHE_VERSION을 반드시 bump ★
-const CACHE_VERSION = "v20260714-19";
+const CACHE_VERSION = "v20260714-20";
 const CACHE_NAME = "app-" + CACHE_VERSION;
 // 새 js/에셋 파일을 추가하면 여기에도 추가 (Paws-Order 누락 전례)
 const PRECACHE = [

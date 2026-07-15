@@ -53,11 +53,38 @@ export async function updateConfig(patch) {
   await updateLobby(currentCode, (room) => ({ config: { ...room.config, ...patch } }));
 }
 
+export function isHost(room) {
+  return !!(room && room.hostId === myNetId());
+}
+
+// 호스트가 로비에서 AI 좌석을 추가/제거한다. AI는 실제 접속이 없으므로 joinedAt은
+// serverTimestamp 대신(트랜잭션 안에서는 제대로 치환되지 않을 수 있어) 클라이언트
+// 시각을 쓴다 — 같은 호스트가 순서대로 추가하는 것뿐이라 좌석 순서엔 문제 없다.
+export async function addAiPlayer() {
+  if (!currentCode) return;
+  await updateLobby(currentCode, (room) => {
+    const players = room.players || {};
+    if (Object.keys(players).length >= 4) return undefined;
+    const aiCount = Object.values(players).filter((p) => p.isAI).length;
+    const id = "ai-" + Math.random().toString(36).slice(2, 8);
+    return { players: { ...players, [id]: { id, name: `AI ${aiCount + 1}`, isAI: true, online: true, joinedAt: Date.now() } } };
+  });
+}
+
+export async function removePlayer(playerId) {
+  if (!currentCode) return;
+  await updateLobby(currentCode, (room) => {
+    const players = { ...room.players };
+    delete players[playerId];
+    return { players };
+  });
+}
+
 // 호스트가 "게임 시작"을 누르면: 참가 순서(joinedAt)대로 좌석을 배정해 로컬
 // createGame()으로 실제 엔진 상태를 만들고, 각 플레이어에 netId를 붙여 방에 쓴다.
-// 이후 모든 클라이언트는 이 state만 구독해서 렌더한다 — 온라인 플레이는 오직
-// 사람끼리만 지원한다(AI 좌석 없음, 누가 호스트가 AI를 대신 처리할지 정할 필요가
-// 없어 훨씬 단순해진다).
+// 이후 모든 클라이언트는 이 state만 구독해서 렌더한다 — 온라인 플레이는 사람과
+// AI를 함께 지원하되, AI 턴은 호스트의 클라이언트가 전담해 계산한다(js/ui.js의
+// scheduleAiIfNeeded 참조) — 호스트가 자리를 비우면 그 사이엔 AI 턴이 멈춘다.
 export async function hostStartGame(room) {
   const joined = Object.values(room.players || {}).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
   if (joined.length < 2 || joined.length > 4) {
@@ -65,7 +92,7 @@ export async function hostStartGame(room) {
   }
   const state = createGame({
     playerNames: joined.map((p) => p.name),
-    aiFlags: joined.map(() => false),
+    aiFlags: joined.map((p) => !!p.isAI),
     useTraits: !!room.config?.useTraits,
     variantMode: room.config?.variantMode || "none",
     deckMultiplier: room.config?.deckMultiplier || 1,

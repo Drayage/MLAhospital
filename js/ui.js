@@ -438,6 +438,24 @@ async function handleActionClick(btn) {
     }
     return; // 구독 콜백이 곧 "playing" 상태를 넣어준다
   }
+  if (action === "online-add-ai") {
+    if (!online) return;
+    try {
+      await online.addAiPlayer();
+    } catch (err) {
+      console.error(err);
+    }
+    return;
+  }
+  if (action === "online-remove-player") {
+    if (!online) return;
+    try {
+      await online.removePlayer(btn.getAttribute("data-player-id"));
+    } catch (err) {
+      console.error(err);
+    }
+    return;
+  }
 
   if (action === "dismiss-bust") {
     dismissBust();
@@ -661,12 +679,24 @@ function dismissBust() {
 }
 
 // 현재 결정권자가 AI면 잠시 후 스스로 행동을 골라 진행한다 (사람처럼 약간의 텀을 둔다).
-// 온라인 게임엔 AI 좌석이 없으므로(현재 지원 범위 밖) 이 함수는 자연히 no-op이 된다.
+// 온라인에서는 AI 턴을 "누가 계산해서 서버에 올릴지" 정해야 하는데, 호스트의
+// 클라이언트만 담당하게 한다(다른 접속자가 동시에 같은 AI 행동을 중복 전송하는
+// 걸 막는 가장 단순한 방법 — 대신 호스트가 자리를 비우면 그 사이엔 AI 턴이 멈춘다).
 function scheduleAiIfNeeded() {
   clearTimeout(aiTimer);
   if (!game || pendingBust || game.phase === "game_over") return;
   const actor = currentActor();
   if (!actor || !actor.isAI) return;
+
+  if (onlineCode) {
+    if (!online || !online.isHost(onlineRoom)) return;
+    aiTimer = setTimeout(() => {
+      const action = chooseAiAction(game);
+      if (action) dispatchOnlineAction(action);
+    }, AI_THINK_DELAY_MS);
+    return;
+  }
+
   aiTimer = setTimeout(() => {
     const action = chooseAiAction(game);
     if (action) commitAction(action);

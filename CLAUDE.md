@@ -92,12 +92,15 @@
   프로젝트는 여러 게임이 공유하고, 실제 배포된 규칙(`{"games": {".read": true,
   ".write": true}}`)이 "games" 서브트리만 열어두므로 **절대 이 경로 밖에 쓰면
   안 된다** — 원본 game-baserule의 기본 경로(`${APP_ID}_rooms/`)와 다르다는 점에 주의.
-- 온라인 게임은 오직 사람끼리만 지원한다(AI 좌석 없음) — 누가 AI 턴을 대신
-  처리할지 정할 필요가 없어져 호스트 권한 문제가 통째로 사라진다.
-- 방 생성/참가 → 로비(`phase:"lobby"`, 호스트가 특기/변형규칙/특수모드 설정) →
+- 온라인 게임은 사람 + AI 좌석을 함께 지원한다. AI 좌석은 호스트가 로비에서
+  추가/제거하며(`online.addAiPlayer`/`removePlayer`), 실제 턴 계산은 **호스트의
+  클라이언트만** 담당한다(`js/ui.js`의 `scheduleAiIfNeeded`가 `online.isHost(room)`로
+  확인) — 여러 접속자가 같은 AI 행동을 동시에 중복 전송하는 걸 막는 가장 단순한
+  방법이지만, 호스트가 자리를 비우면 그 사이엔 AI 턴이 멈춘다는 트레이드오프가 있다.
+- 방 생성/참가 → 로비(`phase:"lobby"`, 호스트가 특기/변형규칙/특수모드/AI 좌석 설정) →
   호스트가 시작을 누르면 참가 순서(`joinedAt`)대로 좌석을 배정해 로컬
-  `createGame()`으로 실제 엔진 state를 만들고 각 플레이어에 `netId`를 붙여
-  방에 씀(`phase:"playing"`).
+  `createGame()`으로 실제 엔진 state를 만들고(`aiFlags`는 각 참가자의 `isAI`를 그대로
+  전달) 각 플레이어에 `netId`를 붙여 방에 씀(`phase:"playing"`).
 - 턴마다: 내 차례인 클라이언트만 `applyAction`을 로컬로 계산해
   `writeState(code, seq, nextState)`로 seq 가드 쓰기 — 모든 클라이언트(행동을
   낸 사람 포함)는 `subscribeRoom`이 돌려주는 서버 확정 상태만 그린다(낙관적
