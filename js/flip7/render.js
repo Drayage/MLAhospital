@@ -1,5 +1,5 @@
 // 순수 렌더 함수 — 상태를 HTML 문자열로 바꾸기만 한다. 규칙 로직 없음.
-import { getCard, cardDisplay, computeCardsScore, FLIP_TARGET } from "./cards.js";
+import { getCard, cardDisplay, computeCardsScore, FLIP_TARGET, numberColor } from "./cards.js";
 
 const STATUS_LABEL = {
   active: "접수 중",
@@ -30,7 +30,7 @@ export function flip7SetupScreenHtml() {
   return `
     <button type="button" class="mla-inline-link" data-action="back-to-game-choice">← 게임 선택으로</button>
     <h2>🎫 번호표 뽑기</h2>
-    <p class="mla-muted">원작: Flip Seven — 대기실에서 번호표를 뽑다가, 같은 번호가 다시 나오면 그날 접수는 없던 일이 돼요. 서로 다른 번호 7장을 모으면 즉시 큰 보너스!</p>
+    <p class="mla-muted">대기실에서 번호표를 뽑다가, 같은 번호가 다시 나오면 그날 접수는 없던 일이 돼요. 서로 다른 번호 7장을 모으면 즉시 큰 보너스!</p>
     <form id="mla-f7-setup-form">
       <div class="mla-setup-field">
         <label for="mla-f7-player-count">인원수</label>
@@ -43,9 +43,54 @@ export function flip7SetupScreenHtml() {
     </form>`;
 }
 
+// 번호표(숫자) 카드는 값마다 다른 색으로 테두리/숫자를 칠해서 한눈에 구분되게 한다.
+function numberStyleAttrs(card) {
+  if (card.kind !== "number") return "";
+  const c = numberColor(card.value);
+  return ` style="border-color:${c}; box-shadow:0 0 0 2px ${c} inset, var(--shadow);"`;
+}
+function numberValueStyle(card) {
+  return card.kind === "number" ? ` style="color:${numberColor(card.value)};"` : "";
+}
+
 function cardChip(cardId) {
   const d = cardDisplay(cardId);
-  return `<span class="mla-suit-card" title="${esc(d.label)}"><span class="mla-icon">${d.icon}</span><span class="mla-value">${esc(d.sub)}</span></span>`;
+  const card = getCard(cardId);
+  return `<span class="mla-suit-card"${numberStyleAttrs(card)} title="${esc(d.label)}"><span class="mla-icon">${d.icon}</span><span class="mla-value"${numberValueStyle(card)}>${esc(d.sub)}</span></span>`;
+}
+
+// 카드 한 장이 새로 열리는 순간의 3D 플립 연출 — 우리집 동물병원과 같은 CSS 클래스를 재사용한다.
+function flipCardHtml(cardId) {
+  const d = cardDisplay(cardId);
+  const card = getCard(cardId);
+  const faceInner = `<div class="mla-icon">${d.icon}</div><div class="mla-value"${numberValueStyle(card)}>${esc(d.sub)}</div>`;
+  return `<div class="mla-flip-outer">
+    <div class="mla-flip-inner" style="animation-duration:0.5s;animation-delay:0.12s;">
+      <div class="mla-flip-face mla-flip-back">🎫</div>
+      <div class="mla-flip-face mla-flip-front mla-suit-card"${numberStyleAttrs(card)}>${faceInner}</div>
+    </div>
+  </div>`;
+}
+
+// HIT 한 번의 결과를 "천천히 확인"할 수 있도록 전체 화면을 잠깐 대신하는 리빌 패널.
+// reveal: { actorName, cardId, message, tone, notable, lostCards }
+export function flip7RevealHtml(reveal) {
+  const flashClass = reveal.tone === "bust" ? " mla-bust-flash" : "";
+  const messageClass = reveal.tone === "bust" ? "mla-bust-banner" : "mla-decision-banner";
+  const lostHtml =
+    reveal.lostCards && reveal.lostCards.length > 0
+      ? `<div class="mla-row" style="margin-top:8px; justify-content:center;">${reveal.lostCards.map(cardChip).join("")}</div>
+         <div class="mla-muted mla-center" style="margin-top:4px;">위 카드를 모두 귀가 더미로 보냈어요</div>`
+      : "";
+  const hint = reveal.notable ? `<div class="mla-muted mla-center" style="margin-top:12px;">탭하면 계속</div>` : "";
+  return `
+    <div class="mla-panel mla-center${flashClass}" data-action="f7-dismiss-reveal" style="min-height:280px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer;">
+      <div class="mla-muted">${esc(reveal.actorName)}</div>
+      <div style="margin:10px 0;">${flipCardHtml(reveal.cardId)}</div>
+      <div class="${messageClass}" style="max-width:300px;">${esc(reveal.message)}</div>
+      ${lostHtml}
+      ${hint}
+    </div>`;
 }
 
 function playerStatusPillClass(status) {

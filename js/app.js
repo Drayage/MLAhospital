@@ -33,7 +33,7 @@ function renderChooser() {
       <h1 style="font-size:22px">어떤 게임을 할까요?</h1>
     </div>
     <button type="button" class="mla-choice-btn" data-action="choose-hospital" style="padding:16px; font-weight:700;">🏥 우리집 동물병원<br><span class="mla-muted" style="font-weight:400">환자 카드를 접수하는 푸시 유어 럭 게임</span></button>
-    <button type="button" class="mla-choice-btn" data-action="choose-flip7" style="padding:16px; font-weight:700; margin-top:10px;">🎫 번호표 뽑기<br><span class="mla-muted" style="font-weight:400">서로 다른 번호 7개를 모으는 푸시 유어 럭 게임 (원작: Flip Seven)</span></button>`;
+    <button type="button" class="mla-choice-btn" data-action="choose-flip7" style="padding:16px; font-weight:700; margin-top:10px;">🎫 번호표 뽑기<br><span class="mla-muted" style="font-weight:400">서로 다른 번호 7개를 모으는 푸시 유어 럭 게임</span></button>`;
 
   document.getElementById("action-bar-primary").innerHTML = "";
   document.getElementById("surrender-btn").hidden = true;

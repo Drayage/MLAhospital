@@ -56,7 +56,9 @@
 
 - `js/flip7/cards.js` — 94장 덱 구성(번호표 0~12 + 보너스/특수권), `getCard`는 카드 ID에서
   직접 파싱(고정 풀 조회 방식이 아님 — 동물병원 `getCard`가 겪었던 deckMultiplier 버그를
-  같은 함정에 안 빠지려고 처음부터 피함), `cardDisplay`로 병원 접수 테마 아이콘/라벨 제공
+  같은 함정에 안 빠지려고 처음부터 피함), `cardDisplay`로 병원 접수 테마 아이콘/라벨 제공,
+  `numberColor`로 숫자마다 다른 색(0~12 고른 간격 hue) 부여, `ACTION_DESCRIPTIONS`로
+  특수권 카드가 열릴 때 보여줄 능력 설명 텍스트 제공
 - `js/flip7/state.js` — `createFlip7Game`, `isActive`/`activePlayers` 등 조회 헬퍼
 - `js/flip7/engine.js` — 규칙 엔진 본체. `currentPlayerIndex`는 항상 "지금 결정을 내리는
   사람". 응급 호출(flip_three)로 남에게 순서를 강제로 넘기면 원래 자리를
@@ -70,10 +72,18 @@
 - `js/flip7/ai.js` — `chooseFlip7AiAction(state)`: 카드 카운팅(공개된 남의 접수대 + 귀가
   더미로 "이미 나온 장수"를 빼서) 기반 버스트 확률 추정으로 HIT/STAY 판단, 조기 마감권/
   응급 호출/재접수권 대상도 위험도 기반으로 고름
-- `js/flip7/render.js` — 순수 렌더 함수
+- `js/flip7/render.js` — 순수 렌더 함수. `flipCardHtml`은 동물병원과 같은
+  `.mla-flip-outer`/`.mla-flip-inner` 3D 뒤집기 CSS 클래스를 재사용한다. `flip7RevealHtml`은
+  HIT 한 번의 결과(카드 한 장)를 보여주는 전체 화면 리빌 패널
 - `js/flip7/ui.js` — 컨트롤러 (규칙 로직 없음, 동물병원 `js/ui.js`와 같은 이벤트 위임
   패턴) — 온라인 없음, `#action-bar-primary`/`#surrender-btn` 등 index.html의 공용 DOM을
-  동물병원 컨트롤러와 공유하지만 한 페이지 로드당 둘 중 하나만 로드되므로 리스너 충돌 없음
+  동물병원 컨트롤러와 공유하지만 한 페이지 로드당 둘 중 하나만 로드되므로 리스너 충돌 없음.
+  `pendingReveal`이 동물병원의 `pendingBust`와 같은 역할 — HIT마다 `commitAction`이
+  로그 diff로 무슨 일이 있었는지 판단해 리빌 단계를 연다: 평범한 번호표/보너스는 짧게(뒤집는
+  연출만), 중복(버스트)/7종 완성/특수권 카드(능력 설명 포함)는 길게(탭 또는 자동 타이머로 진행)
+  머문다. 리빌 중엔 다른 행동을 막고, 타이머(`aiTimer`/`roundTimer`/`revealTimer`)는
+  그만두기·새 게임 전환마다 반드시 정리한다(정리 누락으로 null 상태를 건드리는 실제 버그가
+  났던 지점)
 - `js/flip7/storage.js` — 새로고침 복원(동물병원과 저장 슬롯 분리 — `mlahospital_flip7_save`)
 - `tests/flip7.test.mjs` — `node:test` 기반 규칙 테스트(덱 구성/버스트/세컨찬스/조기
   마감권/응급 호출 중첩·복귀/점수 계산/200점 동점 재대결 등)

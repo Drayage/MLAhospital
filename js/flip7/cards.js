@@ -1,4 +1,4 @@
-// 번호표 뽑기(원작: Flip Seven) 카드 정의 — 병원 대기표 접수 테마로 재구성.
+// 번호표 뽑기 카드 정의 — 병원 대기표 접수 테마로 재구성.
 // 원작 카드 구성을 그대로 따른다: 0~12 번호표(숫자만큼 장수, 단 0/1은 1장씩) 79장 +
 // 보너스 카드(+2/+4/+6/+8/+10, VIP 진료권 ×2) 6장 + 특수권 3종×3장 = 94장.
 export const NUMBER_VALUES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -52,6 +52,19 @@ export function cardDisplay(cardId) {
   if (card.actionType === "freeze") return { icon: "🥶", label: "조기 마감권", sub: "" };
   if (card.actionType === "flip_three") return { icon: "🚨", label: "응급 호출", sub: "×3" };
   return { icon: "🎟️", label: "재접수권", sub: "" };
+}
+
+// 특수권(능력) 카드가 열릴 때 화면에 함께 보여줄 설명 — 특기/변형규칙 탭 설명과 같은 톤.
+export const ACTION_DESCRIPTIONS = {
+  freeze: "지정한 사람은 이번 라운드를 즉시 마감(동결)해요. 그때까지 모은 번호표가 그대로 점수로 확정돼요.",
+  flip_three: "지정한 사람은 번호표를 3장 연달아 뽑아야 해요. 중간에 멈출 수 없어요.",
+  second_chance: "번호가 중복되면 한 번 무효로 하고 계속 접수할 수 있어요. 이미 갖고 있으면 아직 없는 다른 사람에게 넘겨요.",
+};
+
+// 숫자마다 다른 색을 줘서(0~12, 13색 고른 간격) 카드가 한눈에 구분되게 한다.
+export function numberColor(value) {
+  const hue = Math.round((value / NUMBER_VALUES.length) * 360) % 360;
+  return `hsl(${hue}, 68%, 40%)`;
 }
 
 export function computeCardsScore(cardIds) {
