@@ -280,13 +280,27 @@
     </div>
   </dialog>
 
+  <dialog id="f7-rules-modal">
+    <h2>🎫 번호표 뽑기 — 게임 방법</h2>
+    <p>대기실에서 번호표를 뽑아 모으는 푸시 유어 럭 카드 게임이에요 (원작: Flip Seven).</p>
+    <ol style="padding-left:18px; font-size:14px; line-height:1.6;">
+      <li>내 차례에 "번호표 뽑기"를 누르면 대기실 덱에서 한 장을 받아요.</li>
+      <li>이번 라운드에 <b>같은 번호</b>가 다시 나오면 <b>번호 중복!</b> — 이번 라운드 접수한 카드를 모두 잃어요.</li>
+      <li>중복되기 전에 "여기서 마감"을 누르면 이번 라운드 카드를 그대로 점수로 확정해요.</li>
+      <li>서로 다른 번호 <b>7장</b>을 모으면 즉시 라운드가 끝나고 +15점 보너스를 받아요.</li>
+      <li>빠른 접수권(+N)/VIP 진료권(×2)은 그대로 쌓이고, 조기 마감권/응급 호출/재접수권은 누군가를 지정해 특수 효과를 일으켜요.</li>
+      <li>총점이 먼저 200점을 넘긴 사람(동점이면 그 사람들끼리 재대결)이 승리해요.</li>
+    </ol>
+    <button onclick="this.closest('dialog').close()">닫기</button>
+  </dialog>
+
   <div id="mla-toast" class="mla-toast"></div>
 
   <script type="module">
     import { APP_VERSION } from "./js/app-config.js";
     import { mountVersionBadge, mountErrorOverlay } from "./js/devtools.js";
     import { initAudio } from "./js/audio.js";
-    import { startApp } from "./js/ui.js";
+    import { startApp } from "./js/app.js";
 
     mountErrorOverlay(); // 가장 먼저 — 초기화 에러도 잡히게
     mountVersionBadge();

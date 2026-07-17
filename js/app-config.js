@@ -4,7 +4,7 @@
 
 export const APP_ID = "mlahospital";
 export const APP_NAME = "우리집 동물병원";
-export const APP_VERSION = "20260714-22";
+export const APP_VERSION = "20260714-23";
 
 // 로컬 한 기기 돌려가며 플레이(hotseat)가 기본이고, 온라인(같은 Firebase 프로젝트를
 // 여러 게임이 공유)도 지원한다 — js/net.js 참조.

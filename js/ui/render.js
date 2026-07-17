@@ -122,6 +122,7 @@ export function playerPanelHtml(state, player, aiThinking) {
 // 첫 화면: 한 기기로 같이(hotseat) vs 온라인으로 같이(다른 기기) 중 선택.
 export function modeChoiceHtml() {
   return `
+  <button type="button" class="mla-inline-link" data-action="back-to-game-choice">← 게임 선택으로</button>
   <div class="mla-panel mla-center">
     <h1 style="font-size:22px">🏥 우리집 동물병원</h1>
     <p class="mla-muted">가족 단위 환자를 접수하는 푸시 유어 럭 카드 게임</p>

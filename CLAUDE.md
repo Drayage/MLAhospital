@@ -1,11 +1,25 @@
-# 우리집 동물병원 — Dead Man's Draw 규칙 기반 동물병원 접수 카드 게임
+# 우리집 동물병원 — 카드 게임 2종을 담은 PWA
 
-바닐라 JS / PWA / 로컬 한 기기 돌려가며 플레이(hotseat, 2~4명) + 온라인(각자 기기, Firebase RTDB) / GitHub Pages 배포.
+바닐라 JS / PWA / GitHub Pages 배포. **게임이 2개** 들어있다 — `js/app.js`가 최상위
+진입점으로 둘 중 무엇을 할지 고르게 한다(진행 중 저장 게임이 있으면 그 게임으로 곧장 재입장):
+
+1. **우리집 동물병원** — Dead Man's Draw 규칙 기반. 로컬 한 기기 돌려가며 플레이(hotseat,
+   2~4명) + 온라인(각자 기기, Firebase RTDB).
+2. **번호표 뽑기** — Flip Seven 규칙 기반(원작 그대로). 로컬 hotseat(2~6명) + AI. 온라인
+   멀티플레이는 아직 없음(범위 밖으로 명시적으로 제외).
+
+두 게임은 완전히 독립된 엔진/UI/저장 슬롯을 쓴다(아래 파일 지도 참조) — 하나를 고치다가
+다른 하나를 건드릴 일이 구조적으로 없다.
 
 ## 파일 지도
 
 <!-- 파일당 500~800줄 이내로 유지. 데이터(카드/특기/변형규칙)는 로직과 분리해
      js/data/*.js에 둘 것 — 콘텐츠 수정 요청이 데이터 파일만 읽고 끝나게. -->
+- `js/app.js` — **최상위 진입점**(index.html이 이걸 불러 startApp() 호출). 두 게임 중
+  저장된 진행 중 게임이 있으면 그 컨트롤러로 바로 들어가고, 없으면 게임 선택 화면을
+  보여준다. 실제 선택된 게임의 `ui.js`만 동적 `import()`한다.
+
+### 우리집 동물병원 (Dead Man's Draw 기반)
 - `js/data/animals.js` — 환자(동물) 10종 정의 (이름/아이콘/설명) — **콘텐츠 수정은 여기**
 - `js/data/cards.js` — 카드 60장 생성/조회 (`deckMultiplier`로 카드 2배 확장 — 파티 모드가 씀)
 - `js/data/traits.js` — 수의사 특기 17종 (효과 훅 포함)
@@ -29,15 +43,48 @@
   네트워크(gstatic.com 등)에 전혀 의존하지 않는다
 - `js/online.js` — 온라인 오케스트레이션(좌석 배정/내 차례 판정/행동 전송) — DOM은 모름,
   `js/net.js`처럼 순수 데이터 계층
-- `sw.js` — PWA 캐시 (network-first + CACHE_VERSION + controllerchange 1회 reload)
+- `sw.js` — PWA 캐시 (network-first + CACHE_VERSION + controllerchange 1회 reload,
+  두 게임 파일을 모두 PRECACHE에 올린다)
 - `tests/engine.test.mjs` — `node:test` 기반 엔진 필수 테스트 (명세 22장 25개 케이스)
 - `scripts/simulate.mjs` — headless 시뮬레이터 (랜덤 정책, 교착 감지)
+
+### 번호표 뽑기 (Flip Seven 기반) — `js/flip7/`
+
+동물병원 엔진과 턴 구조 자체가 달라(한 라운드 안에서 전원이 "더 뽑기/멈추기"를 돌아가며
+선택) 완전히 독립된 엔진으로 분리했다. 시드 RNG(`js/engine/rng.js`)만 그대로 재사용한다
+(state에 seed/rngCounter만 요구하는 범용 유틸이라 게임 간 공유해도 안전).
+
+- `js/flip7/cards.js` — 94장 덱 구성(번호표 0~12 + 보너스/특수권), `getCard`는 카드 ID에서
+  직접 파싱(고정 풀 조회 방식이 아님 — 동물병원 `getCard`가 겪었던 deckMultiplier 버그를
+  같은 함정에 안 빠지려고 처음부터 피함), `cardDisplay`로 병원 접수 테마 아이콘/라벨 제공
+- `js/flip7/state.js` — `createFlip7Game`, `isActive`/`activePlayers` 등 조회 헬퍼
+- `js/flip7/engine.js` — 규칙 엔진 본체. `currentPlayerIndex`는 항상 "지금 결정을 내리는
+  사람". 응급 호출(flip_three)로 남에게 순서를 강제로 넘기면 원래 자리를
+  `state.resumeStack`에 쌓아두고, 그 사람이 멈추거나 터지거나 스스로를 얼리면
+  `resumeOrAdvance`가 스택을 되짚어 돌아온다(재귀 대신 스택 — 응급 호출이 응급 호출을
+  부르는 중첩도 자연 처리). `forcedHitsLeft`는 매 HIT마다 소모되는 카운터일 뿐, 그 자체로
+  턴을 넘기지 않는다 — 강제 3연속이 끝나도 그 사람은 정상적인 HIT/STAY 선택권을 되찾는다
+  (원작 룰 문서로 100% 확증 못한 지점이라 `applyActionTarget` 주석에 판단 근거를 남겨뒀다).
+- `js/flip7/actions.js` — 공개 행동 API: `getLegalActions(state)` / `applyAction(state, action)`
+  (`HIT`/`STAY`/`DECIDE`/`CONTINUE`) — 동물병원과 동일한 설계
+- `js/flip7/ai.js` — `chooseFlip7AiAction(state)`: 카드 카운팅(공개된 남의 접수대 + 귀가
+  더미로 "이미 나온 장수"를 빼서) 기반 버스트 확률 추정으로 HIT/STAY 판단, 조기 마감권/
+  응급 호출/재접수권 대상도 위험도 기반으로 고름
+- `js/flip7/render.js` — 순수 렌더 함수
+- `js/flip7/ui.js` — 컨트롤러 (규칙 로직 없음, 동물병원 `js/ui.js`와 같은 이벤트 위임
+  패턴) — 온라인 없음, `#action-bar-primary`/`#surrender-btn` 등 index.html의 공용 DOM을
+  동물병원 컨트롤러와 공유하지만 한 페이지 로드당 둘 중 하나만 로드되므로 리스너 충돌 없음
+- `js/flip7/storage.js` — 새로고침 복원(동물병원과 저장 슬롯 분리 — `mlahospital_flip7_save`)
+- `tests/flip7.test.mjs` — `node:test` 기반 규칙 테스트(덱 구성/버스트/세컨찬스/조기
+  마감권/응급 호출 중첩·복귀/점수 계산/200점 동점 재대결 등)
+- `scripts/simulate-flip7.mjs` — headless 시뮬레이터 (랜덤 정책, 교착 감지)
 
 ## 명령어
 
 - 로컬 서버: `python3 -m http.server`
-- 테스트: `node --test tests/engine.test.mjs`
-- 시뮬: `node scripts/simulate.mjs [판수]`
+- 테스트: `node --test tests/engine.test.mjs tests/flip7.test.mjs`
+- 시뮬(동물병원): `node scripts/simulate.mjs [판수]`
+- 시뮬(번호표 뽑기): `node scripts/simulate-flip7.mjs [판수]`
 - 아이콘 재생성: `node tools/gen-icons.js`
 
 ## 게임 규칙 요약
@@ -76,8 +123,8 @@
 
 - 처음부터 포함: 상대경로, network-first SW, 새로고침 복원, PWA 매니페스트
   (나중에 얹으면 매번 같은 버그가 났다 — game-baserule 저장소 참조)
-- 게임 로직/턴 흐름을 수정하면 `node --test tests/engine.test.mjs`와
-  `node scripts/simulate.mjs`(교착 0)를 통과시키는 것을 기준으로 삼는다.
+- 게임 로직/턴 흐름을 수정하면 그 게임의 `node --test`(`tests/engine.test.mjs` 또는
+  `tests/flip7.test.mjs`)와 headless 시뮬레이터(교착 0)를 통과시키는 것을 기준으로 삼는다.
 - UI 문자열/새 CSS 클래스는 `mla-` 프리픽스로 구체적 이름 사용 (일반명 충돌 전례)
 - 코드를 고친 커밋마다 `js/app-config.js`의 `APP_VERSION`과 `sw.js`의
   `CACHE_VERSION`을 함께 bump할 것
