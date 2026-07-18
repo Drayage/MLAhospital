@@ -1,13 +1,18 @@
 // 번호표 뽑기 규칙 엔진 — 원작 Flip Seven 룰 그대로.
 //
-// 턴 구조가 우리집 동물병원과 완전히 달라(한 라운드 안에서 전원이 순서대로 "더 뽑기/멈추기"를
-// 고르고, 멈추거나 터지거나 얼면 그 사람은 이번 라운드에서 빠진다) 별도 엔진으로 뒀다.
+// 턴 구조가 우리집 동물병원과 완전히 달라(한 라운드 안에서 전원이 순서대로 딱 한 장씩만
+// 뽑고 다음 사람에게 넘어가는 라운드로빈 — 계속 뽑으려면 다음에 자기 차례가 다시 왔을 때
+// 또 HIT을 골라야 한다. 한 번의 HIT으로 몇 장이고 계속 뽑는 방식이 아니다) 별도 엔진으로
+// 뒀다. 이 "한 턴 = 카드 한 장" 원칙이 있어야 응급 호출(강제로 3장 연속 — 정상적으로는
+// 절대 있을 수 없는 일)이 실제로 의미가 있다.
 //
-// currentPlayerIndex는 항상 "지금 결정을 내리는 사람"을 가리킨다. 응급 호출(flip_three)로
-// 남에게 순서를 강제로 넘기면 원래 사람의 인덱스를 resumeStack에 쌓아두고, 그 사람이 강제
-// 접수를 끝내거나 멈추거나 터지면 resumeOrAdvance가 스택을 되짚어 돌아온다 — 재귀 대신
-// 스택을 쓰는 이유는 응급 호출이 응급 호출을 부르는 중첩 상황(뽑은 카드가 또 응급 호출)도
-// 자연스럽게 처리하기 위해서다.
+// currentPlayerIndex는 항상 "지금 결정을 내리는 사람"을 가리킨다. 카드 한 장을 뽑아
+// 처리하고 나면(버스트/플립7로 라운드가 끝나는 경우 제외) finishHit이 자동으로 다음
+// 활성 플레이어에게 순서를 넘긴다 — 단, 지금 응급 호출로 강제 접수가 남아있으면(같은
+// 사람이 예외적으로 연속으로) 넘기지 않는다. 응급 호출로 남에게 순서를 강제로 넘기면
+// 원래 사람의 인덱스를 resumeStack에 쌓아두고, 그 사람의 강제 접수 3장이 다 끝나면
+// resumeOrAdvance가 스택을 되짚어 돌아온다 — 재귀 대신 스택을 쓰는 이유는 응급 호출이
+// 응급 호출을 부르는 중첩 상황(뽑은 카드가 또 응급 호출)도 자연스럽게 처리하기 위해서다.
 import { getCard, computeCardsScore, FLIP_TARGET, FLIP7_BONUS } from "./cards.js";
 import { getPlayer, currentPlayer, isActive, activePlayers, logAction } from "./state.js";
 import { shuffle } from "../engine/rng.js";
@@ -24,7 +29,8 @@ function drawCard(state) {
 
 export function doHit(state) {
   const player = currentPlayer(state);
-  if (player.forcedHitsLeft > 0) player.forcedHitsLeft -= 1; // 응급 호출로 강제된 접수 하나 소모
+  const wasForced = player.forcedHitsLeft > 0;
+  if (wasForced) player.forcedHitsLeft -= 1; // 응급 호출로 강제된 접수 하나 소모
   const cardId = drawCard(state);
   if (!cardId) {
     doStay(state);
@@ -35,6 +41,13 @@ export function doHit(state) {
   if (card.kind === "number") resolveNumberCard(state, player, cardId, card);
   else if (card.kind === "modifier") resolveModifierCard(state, player, cardId);
   else resolveActionCard(state, player, cardId, card);
+}
+
+// 카드 한 장을 다 처리했다 — 라운드로빈 원칙대로, 지금 강제 접수가 남아있지 않다면
+// (평범한 한 장이었든 응급 호출의 마지막 강제 한 장이었든) 다음 사람에게 순서를 넘긴다.
+// 강제 접수가 아직 남아있으면 같은 사람이 곧장 이어서 한 장 더 뽑는다(중간에 멈출 수 없음).
+function finishHit(state, player) {
+  if (player.forcedHitsLeft === 0) resumeOrAdvance(state);
 }
 
 function resolveNumberCard(state, player, cardId, card) {
@@ -48,7 +61,8 @@ function resolveNumberCard(state, player, cardId, card) {
       player.secondChanceCardId = null;
       state.discard.push(cardId, scId);
       logAction(state, { type: "second_chance_used", playerId: player.playerId, cancelledCardId: cardId });
-      return; // 강제 시퀀스 중이면 다음 HIT에서 forcedHitsLeft가 계속 줄어든다 — 턴은 그대로 유지
+      finishHit(state, player);
+      return;
     }
     bustPlayer(state, player, cardId);
     return;
@@ -61,12 +75,15 @@ function resolveNumberCard(state, player, cardId, card) {
     player.roundStatus = "flipped7";
     logAction(state, { type: "flip7", playerId: player.playerId });
     endRound(state);
+    return;
   }
+  finishHit(state, player);
 }
 
 function resolveModifierCard(state, player, cardId) {
   player.roundCards.push(cardId);
   logAction(state, { type: "modifier_gained", playerId: player.playerId, cardId });
+  finishHit(state, player);
 }
 
 function bustPlayer(state, player, triggeringCardId) {
@@ -99,17 +116,20 @@ function resolveSecondChanceDraw(state, player, cardId) {
   if (!player.secondChanceCardId) {
     player.secondChanceCardId = cardId;
     logAction(state, { type: "second_chance_gained", playerId: player.playerId, cardId });
+    finishHit(state, player);
     return;
   }
   const eligible = activePlayers(state).filter((p) => p.playerId !== player.playerId && !p.secondChanceCardId);
   if (eligible.length === 0) {
     state.discard.push(cardId);
     logAction(state, { type: "second_chance_discarded", playerId: player.playerId, cardId });
+    finishHit(state, player);
     return;
   }
   if (eligible.length === 1) {
     eligible[0].secondChanceCardId = cardId;
     logAction(state, { type: "second_chance_given", playerId: player.playerId, targetPlayerId: eligible[0].playerId, cardId });
+    finishHit(state, player);
     return;
   }
   state.pendingDecision = { type: "give_second_chance", playerId: player.playerId, options: eligible.map((p) => p.playerId), cardId };
@@ -130,6 +150,7 @@ export function doDecide(state, targetPlayerId) {
     const target = getPlayer(state, targetPlayerId);
     target.secondChanceCardId = decision.cardId;
     logAction(state, { type: "second_chance_given", playerId: actor.playerId, targetPlayerId: target.playerId, cardId: decision.cardId });
+    finishHit(state, actor);
     return;
   }
   const actionType = decision.type === "choose_freeze_target" ? "freeze" : "flip_three";
@@ -141,35 +162,50 @@ function applyActionTarget(state, actor, actionType, targetPlayerId) {
   if (actionType === "freeze") {
     target.roundStatus = "frozen";
     logAction(state, { type: "freeze", playerId: actor.playerId, targetPlayerId: target.playerId });
-    // 자기 자신을 얼렸으면 지금 턴(혹은 강제 시퀀스)이 그 자리에서 끝난 것 — 아니면 actor의
-    // 턴은 그대로 이어지므로(currentPlayerIndex를 안 건드림) 손댈 게 없다.
-    if (target.playerId === actor.playerId) resumeOrAdvance(state);
+    if (target.playerId === actor.playerId) {
+      // 자기 자신을 얼리면, 설령 응급 호출로 강제 접수가 남아있던 중이었더라도 그 자리에서
+      // 완전히 끝난다 — 이미 얼어붙은(비활성) 사람에게 "남은 강제 접수"를 계속 시킬 수는
+      // 없으므로 finishHit의 forcedHitsLeft 검사를 거치지 않고 무조건 다음으로 넘긴다.
+      resumeOrAdvance(state);
+    } else {
+      // 남을 얼렸으면 "이번에 뽑은 카드 한 장"에 대한 처리가 끝난 것 — 라운드로빈 원칙대로
+      // actor의 차례는 여기서 끝난다(단, actor 자신이 강제 접수 중이면 finishHit이 넘기지
+      // 않고 actor의 남은 강제 접수를 이어가게 한다).
+      finishHit(state, actor);
+    }
     return;
   }
-  // flip_three: 대상은 3연속 강제 접수(중간에 멈출 수 없음). 자기 자신을 지정하면 지금
-  // 턴에 그대로 이어붙고, 남을 지정하면 순서를 그 사람에게 강제로 넘긴 뒤(원래 자리는
-  // resumeStack에 저장) 그 사람이 멈추거나(3번을 다 채운 뒤엔 STAY도 다시 가능해진다)
-  // 터지거나 스스로를 얼리면 자동으로 actor에게 돌아온다. "강제 3번이 끝난 뒤에도 원하면
-  // 계속 뽑을 수 있는가"는 원작 룰 문서로 100% 확증하지 못해, 더 자연스러운 쪽(강제 구간이
-  // 끝나면 정상적인 본인 선택권을 되찾는다)으로 구현했다 — 다르게 알고 있다면 이 부분만
-  // 고치면 된다.
+  // flip_three: 대상은 3연속 강제 접수(중간에 멈출 수 없음) — 정상적으로는 한 턴에 카드
+  // 한 장만 뽑는 라운드로빈 규칙의 유일한 예외다. 자기 자신을 지정하면 강제 3번이 곧장
+  // 이어지고, 남을 지정하면 순서를 그 사람에게 강제로 넘긴 뒤(원래 자리는 resumeStack에
+  // 저장) 그 사람의 강제 3번이 다 끝나면(멈추거나 터지거나 스스로를 얼리는 게 아니라,
+  // 정확히 3장을 다 채우면) 자동으로 actor 이후 순서로 돌아온다. actor 본인은 이 카드를
+  // 뽑은 것으로 이번 턴을 이미 다 쓴 것이라, 강제 3번이 끝나도 actor에게 "보너스 턴"이
+  // 생기지 않는다(resumeOrAdvance가 그 지점에서 그대로 다음 사람으로 진행한다).
   target.forcedHitsLeft += 3;
   logAction(state, { type: "flip_three", playerId: actor.playerId, targetPlayerId: target.playerId });
   if (target.playerId !== actor.playerId) {
     state.resumeStack.push(state.currentPlayerIndex);
     state.currentPlayerIndex = state.players.findIndex((p) => p.playerId === target.playerId);
   }
+  // 자기 자신을 지정했으면 currentPlayerIndex는 그대로 actor를 가리키고, forcedHitsLeft만
+  // 늘어난 상태 — 다음 HIT 호출이 자동으로 강제 접수 1번째를 처리한다.
 }
 
 function resumeOrAdvance(state) {
   if (state.phase !== "playing") return; // 플립7 등으로 이미 라운드가 끝났으면 아무것도 안 함
   while (state.resumeStack.length > 0) {
     const idx = state.resumeStack.pop();
-    if (isActive(state.players[idx])) {
+    const waiting = state.players[idx];
+    // 스택에 쌓인 사람이 아직 강제 접수가 남아있어야만(=응급 호출 중이었어야만) 그 사람에게
+    // 되돌아간다. 자기 차례를 정상적으로 다 쓰고 응급 호출만 걸어둔 채 기다리던 사람이라면
+    // (forcedHitsLeft가 0) 그 사람의 턴은 이미 끝난 것이니 다음 사람으로 계속 진행한다 —
+    // 라운드로빈 원칙상 응급 호출을 걸었다고 해서 자기 차례가 두 번 오는 게 아니다.
+    if (isActive(waiting) && waiting.forcedHitsLeft > 0) {
       state.currentPlayerIndex = idx;
       return;
     }
-    // 기다리던 사람이 그 사이 얼려지거나 터졌으면 건너뛰고 계속 스택을 되짚는다.
+    state.currentPlayerIndex = idx; // 되돌아갈 대상이 아니면, 다음 탐색의 기준점으로만 쓴다
   }
   advanceToNextActive(state);
 }

@@ -50,9 +50,10 @@
 
 ### 번호표 뽑기 (Flip Seven 기반) — `js/flip7/`
 
-동물병원 엔진과 턴 구조 자체가 달라(한 라운드 안에서 전원이 "더 뽑기/멈추기"를 돌아가며
-선택) 완전히 독립된 엔진으로 분리했다. 시드 RNG(`js/engine/rng.js`)만 그대로 재사용한다
-(state에 seed/rngCounter만 요구하는 범용 유틸이라 게임 간 공유해도 안전).
+동물병원 엔진과 턴 구조 자체가 달라(한 라운드 안에서 전원이 순서대로 딱 한 장씩만 뽑고
+넘기는 라운드로빈 — 계속 뽑으려면 자기 차례가 다시 와야 한다) 완전히 독립된 엔진으로
+분리했다. 시드 RNG(`js/engine/rng.js`)만 그대로 재사용한다(state에 seed/rngCounter만
+요구하는 범용 유틸이라 게임 간 공유해도 안전).
 
 - `js/flip7/cards.js` — 94장 덱 구성(번호표 0~12 + 보너스/특수권), `getCard`는 카드 ID에서
   직접 파싱(고정 풀 조회 방식이 아님 — 동물병원 `getCard`가 겪었던 deckMultiplier 버그를
@@ -61,20 +62,26 @@
   특수권 카드가 열릴 때 보여줄 능력 설명 텍스트 제공
 - `js/flip7/state.js` — `createFlip7Game`, `isActive`/`activePlayers` 등 조회 헬퍼
 - `js/flip7/engine.js` — 규칙 엔진 본체. `currentPlayerIndex`는 항상 "지금 결정을 내리는
-  사람". 응급 호출(flip_three)로 남에게 순서를 강제로 넘기면 원래 자리를
-  `state.resumeStack`에 쌓아두고, 그 사람이 멈추거나 터지거나 스스로를 얼리면
-  `resumeOrAdvance`가 스택을 되짚어 돌아온다(재귀 대신 스택 — 응급 호출이 응급 호출을
-  부르는 중첩도 자연 처리). `forcedHitsLeft`는 매 HIT마다 소모되는 카운터일 뿐, 그 자체로
-  턴을 넘기지 않는다 — 강제 3연속이 끝나도 그 사람은 정상적인 HIT/STAY 선택권을 되찾는다
-  (원작 룰 문서로 100% 확증 못한 지점이라 `applyActionTarget` 주석에 판단 근거를 남겨뒀다).
+  사람". 한 턴엔 카드 한 장만 뽑는다 — `finishHit`이 HIT 처리 끝에 매번 불려서, 강제
+  접수(`forcedHitsLeft`)가 남아있지 않으면 곧장 다음 활성 플레이어에게 순서를 넘긴다(이
+  원칙이 있어야 응급 호출의 "강제 3연속"이 실제로 의미를 가짐). 응급 호출(flip_three)로
+  남에게 순서를 강제로 넘기면 원래 자리를 `state.resumeStack`에 쌓아두고, 그 사람의 강제
+  3번이 다 끝나면(원작 룰 문서로 100% 확증 못한 지점 — `applyActionTarget` 주석 참고)
+  `resumeOrAdvance`가 스택을 되짚어 원래 순서로 복귀한다(재귀 대신 스택 — 응급 호출이
+  응급 호출을 부르는 중첩도 자연 처리). 자기 자신을 조기 마감권으로 얼리면 강제 접수
+  잔여분과 무관하게 무조건 그 자리에서 끝난다(`finishHit`을 거치지 않고 직접
+  `resumeOrAdvance`) — 안 그러면 얼어붙은(비활성) 사람이 `currentPlayerIndex`에 계속
+  남아있는 채로 멈추는 실제 교착 버그가 났던 지점이다.
 - `js/flip7/actions.js` — 공개 행동 API: `getLegalActions(state)` / `applyAction(state, action)`
   (`HIT`/`STAY`/`DECIDE`/`CONTINUE`) — 동물병원과 동일한 설계
 - `js/flip7/ai.js` — `chooseFlip7AiAction(state)`: 카드 카운팅(공개된 남의 접수대 + 귀가
   더미로 "이미 나온 장수"를 빼서) 기반 버스트 확률 추정으로 HIT/STAY 판단, 조기 마감권/
   응급 호출/재접수권 대상도 위험도 기반으로 고름
 - `js/flip7/render.js` — 순수 렌더 함수. `flipCardHtml`은 동물병원과 같은
-  `.mla-flip-outer`/`.mla-flip-inner` 3D 뒤집기 CSS 클래스를 재사용한다. `flip7RevealHtml`은
-  HIT 한 번의 결과(카드 한 장)를 보여주는 전체 화면 리빌 패널
+  `.mla-flip-outer`/`.mla-flip-inner` 3D 뒤집기 CSS 클래스를 재사용한다. 리빌은 별도
+  화면이 아니라 `flip7BoardHtml(state, {reveal})`이 그 플레이어의 카드 줄 안에서
+  카드를 뒤집고 바로 밑에 한 줄 메시지를 보여주는 방식(팝업 없음) — 보드 나머지
+  (헤더/다른 플레이어/그만두기 링크)는 그대로 다 보인다
 - `js/flip7/ui.js` — 컨트롤러 (규칙 로직 없음, 동물병원 `js/ui.js`와 같은 이벤트 위임
   패턴) — 온라인 없음, `#action-bar-primary`/`#surrender-btn` 등 index.html의 공용 DOM을
   동물병원 컨트롤러와 공유하지만 한 페이지 로드당 둘 중 하나만 로드되므로 리스너 충돌 없음.

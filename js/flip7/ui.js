@@ -7,7 +7,7 @@ import { saveFlip7Game, loadFlip7Game, clearFlip7Game } from "./storage.js";
 import { getCard, ACTION_DESCRIPTIONS } from "./cards.js";
 import { playSfx, startBgm, stopBgm } from "../audio.js";
 import { HOSPITAL } from "../palettes.js";
-import { flip7SetupScreenHtml, flip7NameFieldsHtml, flip7BoardHtml, flip7RoundSummaryHtml, flip7GameOverHtml, flip7RevealHtml } from "./render.js";
+import { flip7SetupScreenHtml, flip7NameFieldsHtml, flip7BoardHtml, flip7RoundSummaryHtml, flip7GameOverHtml } from "./render.js";
 
 let game = null;
 let aiTimer = null;
@@ -50,8 +50,10 @@ function currentActor() {
 }
 
 function render() {
-  if (pendingReveal) {
-    gameArea().innerHTML = flip7RevealHtml(pendingReveal);
+  if (pendingReveal && game) {
+    // 리빌 중엔 화면을 통째로 바꾸지 않고, 원래 보드 안에서 그 사람 줄에 카드가
+    // 뒤집히는 걸 그대로 보여준다(별도 화면/팝업 없음).
+    gameArea().innerHTML = flip7BoardHtml(game, { reveal: pendingReveal });
     renderActionBar();
     return;
   }
@@ -224,7 +226,6 @@ function startReveal(actorId, cardsBefore, newEntries) {
   }
   const cardId = drawnEntry.cardId;
   const card = getCard(cardId);
-  const actorName = (game.players.find((p) => p.playerId === actorId) || {}).displayName || "";
 
   const bustEntry = newEntries.find((e) => e.type === "bust");
   const flip7Entry = newEntries.find((e) => e.type === "flip7");
@@ -291,7 +292,7 @@ function startReveal(actorId, cardsBefore, newEntries) {
   }
 
   playSfx(HOSPITAL, sfx);
-  pendingReveal = { actorId, actorName, cardId, message, tone, notable, lostCards };
+  pendingReveal = { playerId: actorId, cardId, message, tone, notable, lostCards };
   render();
   clearTimeout(revealTimer);
   revealTimer = setTimeout(dismissReveal, notable ? REVEAL_NOTABLE_MS : REVEAL_QUICK_MS);
